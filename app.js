@@ -437,8 +437,8 @@ function requireLogin(actionName = 'ดำเนินการนี้') {
 // 1. การสลับแท็บเมนู
 // ==========================================
 window.switchTab = function (tabId) {
-  // บล็อกไม่ให้ Guest สลับไปแท็บอื่นนอกจาก Dashboard & แผนผัง
-  if ((currentUserRole === 'guest' || !currentUserRole) && tabId !== 'dashboard') {
+  // Block Guest from switching to tabs other than Dashboard and History
+  if ((currentUserRole === 'guest' || !currentUserRole) && !['dashboard','history'].includes(tabId)) {
     tabId = 'dashboard';
   }
 
@@ -1271,6 +1271,7 @@ function renderMapPins() {
           ${(!isGuest && item.status === 'ISSUE') ? `<button onclick="markAssetRepairing('${item.assetId}')" class="btn-sm" style="margin-top:6px; width:100%; background:#f59e0b; color:white;">🔧 ส่งซ่อมบำรุง</button>` : ''}
           ${(!isGuest && item.status === 'REPAIRING') ? `<button onclick="openRepairCompleteModal('${item.assetId}')" class="btn-sm" style="margin-top:6px; width:100%; background:#10b981; color:white;">✅ ซ่อมเสร็จแล้ว</button>` : ''}
           ${!isGuest ? `<button onclick="handleScanned('${item.assetId}')" class="btn-sm" style="margin-top:6px; width:100%; background:#00695c; color:white;">ตรวจเช็กจุดนี้</button>` : ''}
+          <button onclick="showAssetHistoryModal('${item.assetId}')" class="btn-sm" style="margin-top:6px; width:100%; background:#2563eb; color:white;">📜 ดูประวัติ</button>
         </div>
       `);
       markers.push(marker);
@@ -1353,6 +1354,7 @@ function renderMapPins() {
             บันทึกตรวจเช็กจุดนี้
           </button>
           ` : ''}
+          <button onclick="showAssetHistoryModal('${item.assetId}')" class="btn-sm" style="margin-top:6px; width:100%; background:#2563eb; color:white;">📜 ดูประวัติ</button>
         </div>
       `);
       markers.push(marker);
@@ -3540,7 +3542,7 @@ function applyUserSession(name, role) {
   const adminAddAssetBtn = document.getElementById('admin-add-asset-btn');
 
   currentUserRole = role;
-  document.body.classList.remove('role-admin', 'role-executive', 'role-inspector', 'role-chef_inspector', 'role-chef-inspector');
+  document.body.classList.remove('role-admin', 'role-executive', 'role-inspector', 'role-chef_inspector', 'role-chef-inspector', 'role-guest');
   const normalizedRole = (role || '').replace(/[\s-]+/g, '_');
   document.body.classList.add('role-' + normalizedRole);
   if (normalizedRole === 'chef_inspector') {
@@ -5323,7 +5325,34 @@ window.printExecutiveReport = function () {
   if (!reportContainer || !reportContainer.innerHTML.trim()) {
     window.renderSelectedReport();
   }
-  window.print();
+  
+  // ซ่อนแถบเครื่องมือด้วย JavaScript โดยตรงเพื่อหลีกเลี่ยงบั๊กจาก CSS Media Query
+  const toolbar = document.getElementById('executive-report-toolbar');
+  const header = document.querySelector('header');
+  const userBar = document.querySelector('.user-bar');
+  const navTabs = document.querySelector('.nav-tabs');
+  
+  // จำค่าเดิมไว้
+  const origToolbarDisplay = toolbar ? toolbar.style.getPropertyValue('display') : '';
+  const origHeaderDisplay = header ? header.style.getPropertyValue('display') : '';
+  const origUserBarDisplay = userBar ? userBar.style.getPropertyValue('display') : '';
+  const origNavTabsDisplay = navTabs ? navTabs.style.getPropertyValue('display') : '';
+
+  if (toolbar) toolbar.style.setProperty('display', 'none', 'important');
+  if (header) header.style.setProperty('display', 'none', 'important');
+  if (userBar) userBar.style.setProperty('display', 'none', 'important');
+  if (navTabs) navTabs.style.setProperty('display', 'none', 'important');
+
+  // ให้เวลาบราวเซอร์อัปเดตหน้าจอก่อนสั่งพิมพ์
+  setTimeout(() => {
+    window.print();
+    
+    // คืนค่ากลับหลังพิมพ์เสร็จหรือยกเลิก
+    if (toolbar) { if (origToolbarDisplay) toolbar.style.setProperty('display', origToolbarDisplay); else toolbar.style.removeProperty('display'); }
+    if (header) { if (origHeaderDisplay) header.style.setProperty('display', origHeaderDisplay); else header.style.removeProperty('display'); }
+    if (userBar) { if (origUserBarDisplay) userBar.style.setProperty('display', origUserBarDisplay); else userBar.style.removeProperty('display'); }
+    if (navTabs) { if (origNavTabsDisplay) navTabs.style.setProperty('display', origNavTabsDisplay); else navTabs.style.removeProperty('display'); }
+  }, 200);
 };
 
 window.setExecutiveApproval = async function (decision, syncCloud = true) {
@@ -5924,6 +5953,4 @@ window.renderChefCertificationUI = function () {
     }
   }
 };
-
-
 

@@ -1157,25 +1157,104 @@ body.role-admin #admin-map-drag-notice {
 .no-print { }
 .only-print { display: none !important; }
 
-/* Print Mode for QR Sticker and Executive Report */
+.memo-header-top {
+  position: relative;
+  min-height: 115px;
+  margin-bottom: 12px;
+}
+.memo-garuda-img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 75px;
+  height: auto;
+  display: block;
+}
+.memo-title-banner {
+  text-align: center;
+  padding-top: 25px;
+}
+.memo-title-banner h1 {
+  margin: 0;
+  font-weight: 700;
+  color: #000000;
+}
+.memo-meta-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+.memo-meta-table td {
+  border: none;
+  padding: 0;
+  vertical-align: middle;
+  line-height: 1.45;
+}
+.memo-label {
+  font-weight: 700;
+  margin-right: 8px;
+}
+.memo-para {
+  text-indent: 2.5cm;
+  margin-bottom: 14px;
+  line-height: 1.45;
+  text-align: justify;
+}
+.memo-section-heading {
+  font-weight: 700;
+  margin-top: 14px;
+  margin-bottom: 4px;
+}
+
+/* ลายเซ็น */
+.memo-sign-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 14px;
+  page-break-inside: avoid;
+}
+.memo-sign-table td {
+  border: none;
+  padding: 0;
+  vertical-align: top;
+  line-height: 1.4;
+}
+
+@page {
+  size: A4;
+  margin: 0;
+}
+
 @media print {
-  body * { visibility: hidden; }
+  body { margin: 0; padding: 0; background: #fff; }
+  
+  /* Hide irrelevant UI elements completely so they don't take up space */
+  #login-screen, .user-bar, header, .nav-tabs, 
+  #tab-dashboard, #tab-scanner, #tab-register, #tab-assets, #tab-history, #tab-backup, #tab-admin,
+  #executive-report-toolbar, .map-toast, .modal-overlay,
+  body.role-admin #executive-report-toolbar,
+  body.role-executive #executive-report-toolbar,
+  body.role-inspector #executive-report-toolbar,
+  body.role-chef_inspector #executive-report-toolbar,
+  body.role-chef-inspector #executive-report-toolbar {
+    display: none !important;
+  }
   .no-print { display: none !important; }
   .only-print { display: block !important; }
 
   /* If printing QR */
-  .qr-result, .qr-result * { visibility: visible; }
   .qr-result {
-    position: absolute; left: 0; top: 0; width: 100%;
+    display: block !important;
+    position: relative !important;
+    width: 100%;
     border: none; box-shadow: none;
   }
 
   /* If printing Report */
-  #executive-report-container, #executive-report-container * {
-    visibility: visible;
-  }
   #executive-report-container {
-    position: absolute; left: 0; top: 0; width: 100%;
+    display: block !important;
+    position: relative !important; 
+    left: auto; top: auto; width: 100% !important;
     border: none !important; box-shadow: none !important; padding: 0 !important;
     margin: 0 !important;
   }
@@ -1211,12 +1290,10 @@ body.role-admin #admin-map-drag-notice {
   .memo-paper {
     box-shadow: none !important;
     border: none !important;
-    margin: 0 !important;
-    width: 100% !important;
+    margin: 0 auto !important;
+    width: 210mm !important;
     max-width: none !important;
     min-height: auto !important;
-    page-break-after: avoid;
-    page-break-inside: avoid;
   }
   .memo-editable {
     outline: none !important;
@@ -1264,7 +1341,7 @@ body.role-admin #admin-map-drag-notice {
 /* หัวบันทึกข้อความ */
 .memo-header-top {
   position: relative;
-  min-height: 85px;
+  min-height: 115px;
   margin-bottom: 12px;
 }
 .memo-garuda-img {
@@ -1326,6 +1403,7 @@ body.role-admin #admin-map-drag-notice {
   width: 100%;
   border-collapse: collapse;
   margin-top: 14px;
+  page-break-inside: avoid;
 }
 .memo-sign-table td {
   border: none;
