@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?t=55555">
+  <link rel="stylesheet" href="style.css?t=77777">
 
   <!-- Leaflet CSS & JS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -1411,6 +1411,53 @@
   </div>
 
   <!-- ============================================== -->
+  <!-- MODAL: แก้ไขข้อมูลผู้ใช้งาน (Admin Edit User) -->
+  <!-- ============================================== -->
+  <div id="admin-edit-user-modal" class="modal-overlay hidden" onclick="if(event.target===this) closeAdminEditUserModal()">
+    <div class="auth-card" style="max-width:480px;" onclick="event.stopPropagation()">
+      <button class="modal-close-btn" onclick="closeAdminEditUserModal()" title="ปิด">✕</button>
+
+      <div class="auth-header" style="background:linear-gradient(135deg, #b45309, #d97706);">
+        <div class="auth-logo-badge">✏️</div>
+        <h3 class="auth-title" style="color:white;">แก้ไขข้อมูลผู้ใช้งาน</h3>
+        <p class="auth-subtitle" id="edit-user-email-label" style="color:#fef3c7;"></p>
+      </div>
+
+      <div class="auth-body" style="padding:20px;">
+        <form onsubmit="event.preventDefault(); submitAdminEditUser();">
+          <input type="hidden" id="edit-user-email-hidden">
+          
+          <div class="auth-field-group">
+            <label class="auth-label">ชื่อ-นามสกุล:</label>
+            <input type="text" id="edit-user-name" class="auth-input" required>
+          </div>
+
+          <div class="auth-field-group">
+            <label class="auth-label">หน่วยงาน / ตำแหน่ง:</label>
+            <input type="text" id="edit-user-dept" class="auth-input" required>
+          </div>
+
+          <div class="auth-field-group">
+            <label class="auth-label">รหัสผ่านใหม่ (ปล่อยว่างถ้าไม่ต้องการเปลี่ยน):</label>
+            <input type="password" id="edit-user-pwd" class="auth-input" minlength="6" placeholder="••••••••">
+          </div>
+          
+          <div class="auth-field-group">
+            <label class="auth-label">อีเมลใหม่ (ปล่อยว่างถ้าไม่ต้องการเปลี่ยน):</label>
+            <input type="email" id="edit-user-email-new" class="auth-input" placeholder="หากเปลี่ยน ผู้ใช้ต้องล็อกอินใหม่ด้วยอีเมลนี้">
+          </div>
+
+          <div style="margin-top:24px;">
+            <button type="submit" class="btn-primary" style="background:#b45309; width:100%;">
+              💾 บันทึกการแก้ไข
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
   <!-- MODAL: วาดหรืออัปโหลดลายเซ็นเจ้าหน้าที่ (Signature Pad Modal) -->
   <!-- ============================================== -->
   <div id="signature-modal" class="modal-overlay hidden" onclick="if(event.target===this) closeSignatureModal()">
@@ -1490,7 +1537,7 @@
   <!-- แจ้งเตือนสถานะการย้ายพิกัดหมุด (Admin Map Toast) -->
   <div id="map-toast-notification" class="map-toast"></div>
 
-  <script type="module" src="app.js?t=3333"></script>
+  <script type="module" src="app.js?t=77777"></script>
 </body>
 
 </html>

@@ -741,6 +741,19 @@ tr:hover {
 }
 .btn-action-verify:hover { background: #15803d; }
 
+.btn-action-edit {
+  background: #f59e0b;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-action-edit:hover { background: #d97706; }
+
 .btn-action-reset {
   background: #0284c7;
   color: white;

@@ -3446,6 +3446,59 @@ window.adminDeleteUser = function (userEmail) {
   }
 };
 
+// ฟังก์ชันสำหรับแอดมิน: แก้ไขข้อมูลผู้ใช้ (เปิด Modal)
+window.adminEditUserDept = function (userEmail) {
+  const users = getStoredUsers();
+  const user = users.find(u => u.email.toLowerCase() === userEmail.toLowerCase());
+  if (!user) return;
+
+  document.getElementById('edit-user-email-hidden').value = user.email;
+  document.getElementById('edit-user-email-label').innerText = user.email;
+  document.getElementById('edit-user-name').value = user.name || '';
+  document.getElementById('edit-user-dept').value = user.dept || '';
+  document.getElementById('edit-user-pwd').value = '';
+  document.getElementById('edit-user-email-new').value = '';
+
+  document.getElementById('admin-edit-user-modal').classList.remove('hidden');
+};
+
+window.closeAdminEditUserModal = function () {
+  document.getElementById('admin-edit-user-modal').classList.add('hidden');
+};
+
+window.submitAdminEditUser = function () {
+  const oldEmail = document.getElementById('edit-user-email-hidden').value;
+  const newName = document.getElementById('edit-user-name').value.trim();
+  const newDept = document.getElementById('edit-user-dept').value.trim();
+  const newPwd = document.getElementById('edit-user-pwd').value.trim();
+  let newEmail = document.getElementById('edit-user-email-new').value.trim();
+
+  let users = getStoredUsers();
+  const userIndex = users.findIndex(u => u.email.toLowerCase() === oldEmail.toLowerCase());
+  if (userIndex === -1) return;
+  
+  if (newEmail && newEmail.toLowerCase() !== oldEmail.toLowerCase()) {
+    if (users.some(u => u.email.toLowerCase() === newEmail.toLowerCase())) {
+      alert("อีเมลใหม่นี้มีในระบบแล้ว โปรดใช้อีเมลอื่น");
+      return;
+    }
+  } else {
+    newEmail = oldEmail;
+  }
+
+  users[userIndex].name = newName;
+  users[userIndex].dept = newDept;
+  users[userIndex].email = newEmail;
+  if (newPwd) {
+    users[userIndex].password = newPwd;
+  }
+
+  saveStoredUsers(users);
+  window.renderAdminUserList();
+  closeAdminEditUserModal();
+  alert("บันทึกการแก้ไขข้อมูลเรียบร้อยแล้ว");
+};
+
 // ฟังก์ชันสำหรับแอดมิน: เรนเดอร์ตารางผู้ใช้งาน
 window.renderAdminUserList = function () {
   const tbody = document.getElementById('admin-users-table-body');
@@ -3473,6 +3526,8 @@ window.renderAdminUserList = function () {
 
     const resetBtn = `<button class="btn-action-reset" onclick="adminResetPassword('${u.email}')" title="ตั้งรหัสผ่านใหม่">🔑 รีเซ็ตรหัส</button>`;
 
+    const editDeptBtn = `<button class="btn-action-edit" onclick="adminEditUserDept('${u.email}')" title="แก้ไขข้อมูล">✏️ แก้ไข</button>`;
+
     const deleteBtn = u.role !== 'admin'
       ? `<button class="btn-action-delete" onclick="adminDeleteUser('${u.email}')" title="ลบบัญชี">🗑️ ลบ</button>`
       : '';
@@ -3487,6 +3542,7 @@ window.renderAdminUserList = function () {
         <td style="text-align:center;">
           <div class="admin-actions-cell">
             ${verifyBtn}
+            ${editDeptBtn}
             ${resetBtn}
             ${deleteBtn}
           </div>
