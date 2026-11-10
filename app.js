@@ -1,3 +1,4 @@
+import { storageService } from './js/storage-service.js';
 // app.js
 // ระบบตรวจสอบความปลอดภัยถังดับเพลิงและไฟฉุกเฉิน โรงพยาบาลพยุหะคีรี (Pyuha Safety System)
 
@@ -7,79 +8,29 @@ import {
   query, orderBy, onSnapshot, serverTimestamp, ref, uploadBytes, getDownloadURL,
   signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut
 } from './firebase-config.js';
+import { floorConfigs, getCleanName, cleanAssetType, getAssetDirectUrl, extractAssetIdFromScan } from './js/constants.js';
+import { reportBuildingMetadata } from './js/report-constants.js';
+import { getSession, setSession, clearSession, updateSessionActivity, initActivityTracker } from './js/auth.js';
+import { initGlobalEvents } from './js/events.js';
+import { initScannerController } from './js/scanner-controller.js';
+import { initRegisterController } from './js/register-controller.js';
 
-// ข้อมูลผังอาคารทั้ง 6 โซนของ รพ.พยุหะคีรี
-const floorConfigs = {
-  building_hpc: {
-    name: 'อาคารส่งเสริมสุขภาพ',
-    imageUrl: 'maps/hpc_floorplan.webp?v=' + Date.now(),
-    bounds: [[0, 0], [724, 1024]]
-  },
-  building_ipd: {
-    name: 'อาคารผู้ป่วยใน (IPD)',
-    imageUrl: 'maps/ipd_floorplan.webp?v=' + Date.now(),
-    bounds: [[0, 0], [576, 1024]]
-  },
-  building_nisit: {
-    name: 'อาคารนิสิตคุณากร (Covid 19)',
-    imageUrl: 'maps/nisit_floorplan.webp?v=' + Date.now(),
-    bounds: [[0, 0], [576, 1024]]
-  },
-  building_er_upper: {
-    name: 'อาคารอุบัติเหตุ (ชั้นบน)',
-    imageUrl: 'maps/er_upper_floorplan.webp?v=' + Date.now(),
-    bounds: [[0, 0], [576, 1024]]
-  },
-  building_er_lower: {
-    name: 'อาคารอุบัติเหตุ (ชั้นล่าง)',
-    imageUrl: 'maps/er_lower_floorplan.webp?v=' + Date.now(),
-    bounds: [[0, 0], [576, 1024]]
-  },
-  building_opd_dm: {
-    name: 'ตึกแก้วกัลยา (ผู้ป่วยนอก OPD)',
-    imageUrl: 'maps/opd_dm_floorplan.webp?v=' + Date.now(),
-    bounds: [[0, 0], [723, 1024]]
-  },
-  building_pharma_rehab: {
-    name: 'อาคารเวชศาสตร์ฟื้นฟู-โภชนาการ-คลังยา-จ่ายกลาง',
-    imageUrl: 'maps/pharma_rehab_floorplan.webp?v=' + Date.now(),
-    bounds: [[0, 0], [724, 1024]]
-  },
-  building_thai_med: {
-    name: 'อาคารแพทย์แผนไทย',
-    imageUrl: 'maps/thai_med_floorplan.webp?v=' + Date.now(),
-    bounds: [[0, 0], [576, 1024]]
-  },
-  building_canteen: {
-    name: 'อาคารโรงอาหาร',
-    imageUrl: 'maps/canteen_floorplan.webp?v=' + Date.now(),
-    bounds: [[0, 0], [723, 1024]]
-  }
-};
-
-function getCleanName(str) {
-  if (!str) return '';
-  return str.replace(/\s*\([^)]*\)/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+// ลงทะเบียน Service Worker รองรับการทำงาน Offline PWA
+if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then((reg) => console.log('⚡ [PWA] Service Worker registered:', reg.scope))
+      .catch((err) => console.warn('⚠️ [PWA] Service Worker registration failed:', err));
+  });
 }
 
-// ฟังก์ชันมาตรฐานแปลงชื่อประเภทอุปกรณ์ให้ตรงตามมาตรฐานใหม่:
-// 1. ถังดับเพลิง ผงเคมีแห้ง -> "ถังดับเพลิงสีแดง"
-// 2. ถังดับเพลิง คาร์บอนไดออกไซด์ / CO2 -> "ถังดับเพลิงสีเขียว"
-// 3. ไฟส่องสว่างฉุกเฉิน -> "ไฟฉุกเฉิน"
-function cleanAssetType(typeStr) {
-  if (!typeStr) return '';
-  let str = typeStr.trim();
-  if (str.includes('เขียว') || str.includes('CO2') || str.includes('co2') || str.includes('คาร์บอน') || str.includes('Clean Agent') || str.includes('clean agent')) {
-    return 'ถังดับเพลิงสีเขียว';
-  }
-  if (str.includes('แดง') || str.includes('ผงเคมี') || str.includes('Dry Chemical') || str.includes('dry chemical')) {
-    return 'ถังดับเพลิงสีแดง';
-  }
-  if (str.includes('ไฟ') || str.includes('Emergency') || str.includes('emergency')) {
-    return 'ไฟฉุกเฉิน';
-  }
-  return str.replace(/\s*\([^)]*\)/g, '').trim();
-}
+// เริ่มต้นระบบผูก Event Delegation ส่วนกลาง (กำจัด inline onclick)
+initGlobalEvents();
+
+// เริ่มต้นระบบ Scanner
+initScannerController({
+  onScanned: (id) => handleScanned(id)
+});
 
 // ฟังก์ชันแปลงวันที่ให้เป็นรูปแบบภาษาไทยทางการ เช่น "8 กันยายน พ.ศ. 2569"
 function formatThaiFullDate(dateObj = new Date()) {
@@ -95,30 +46,30 @@ function formatThaiFullDate(dateObj = new Date()) {
 
 // ล้างค่าเก่าใน localStorage ที่อาจมีตำแหน่งติดมาในวงเล็บโดยอัตโนมัติ
 try {
-  if (localStorage.getItem('pyh_officer')) {
-    localStorage.setItem('pyh_officer', getCleanName(localStorage.getItem('pyh_officer')));
+  if (storageService.get('pyh_officer')) {
+    storageService.set('pyh_officer', getCleanName(storageService.get('pyh_officer')));
   }
-  const rawTech = localStorage.getItem('pyh_tech_certification');
+  const rawTech = storageService.get('pyh_tech_certification');
   if (rawTech) {
     const obj = JSON.parse(rawTech);
     if (obj && obj.officer) {
       obj.officer = getCleanName(obj.officer);
-      localStorage.setItem('pyh_tech_certification', JSON.stringify(obj));
+      storageService.set('pyh_tech_certification', obj);
     }
   }
-  const rawChef = localStorage.getItem('pyh_chef_certification');
+  const rawChef = storageService.get('pyh_chef_certification');
   if (rawChef) {
     const obj = JSON.parse(rawChef);
     if (obj && obj.officer) {
       obj.officer = getCleanName(obj.officer);
-      localStorage.setItem('pyh_chef_certification', JSON.stringify(obj));
+      storageService.set('pyh_chef_certification', obj);
     }
   }
 
   // ปรับปรุงฐานข้อมูลอุปกรณ์ในเครื่อง (localStorage) ให้เป็นชื่อมาตรฐานใหม่ทันที
-  const rawAssets = localStorage.getItem('pyh_assets_data');
+  const rawAssets = storageService.get('pyh_assets_data');
   if (rawAssets) {
-    const arr = JSON.parse(rawAssets);
+    const arr = typeof rawAssets === 'string' ? JSON.parse(rawAssets) : rawAssets;
     if (Array.isArray(arr)) {
       let changed = false;
       arr.forEach(a => {
@@ -131,16 +82,80 @@ try {
         }
       });
       if (changed) {
-        localStorage.setItem('pyh_assets_data', JSON.stringify(arr));
+        storageService.set('pyh_assets_data', arr);
       }
     }
   }
 } catch (e) { }
 
-let currentOfficer = getCleanName(localStorage.getItem('pyh_officer')) || "นายสุวิทย์ พวงสมบัติ";
-let currentUserRole = localStorage.getItem('pyh_role') || "inspector";
+let currentOfficer = getCleanName(storageService.get('pyh_officer')) || "นายสุวิทย์ พวงสมบัติ";
+let currentUserRole = storageService.get('pyh_role') || "inspector";
 let assetsList = [];
 let inspectionLogs = [];
+
+// ประกาศบน window ทันทีตั้งแต่ต้นไฟล์ เพื่อให้โมดูลอื่นเข้าถึงได้ตลอดเวลา
+Object.defineProperty(window, 'assetsList', {
+  get: () => assetsList,
+  set: (val) => { assetsList = val; },
+  configurable: true
+});
+Object.defineProperty(window, 'currentOfficer', {
+  get: () => currentOfficer,
+  set: (val) => { currentOfficer = val; },
+  configurable: true
+});
+Object.defineProperty(window, 'currentUserRole', {
+  get: () => currentUserRole,
+  set: (val) => { currentUserRole = val; },
+  configurable: true
+});
+Object.defineProperty(window, 'inspectionLogs', {
+  get: () => inspectionLogs,
+  set: (val) => { inspectionLogs = val; },
+  configurable: true
+});
+function renderHistoryTable() {
+  if (typeof window.renderHistoryTable === "function") {
+    window.renderHistoryTable();
+  }
+}
+window.renderHistoryTable = function () {
+  const tbody = document.getElementById('history-rows');
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  const filterStatus = document.getElementById('history-filter-status')?.value || '';
+  const keyword = (document.getElementById('history-search')?.value || '').toLowerCase();
+
+  let logs = [...inspectionLogs];
+
+  // กรองตามสถานะ
+  if (filterStatus) logs = logs.filter(l => l.status === filterStatus);
+  // กรองตามรหัสอุปกรณ์
+  if (keyword) logs = logs.filter(l => l.assetId?.toLowerCase().includes(keyword));
+
+  if (logs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#64748b; padding:20px;">ไม่พบรายการที่ตรงกัน</td></tr>`;
+    return;
+  }
+
+  logs.slice(0, 100).forEach((log, index) => {
+    const isPass = log.status === 'READY';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="text-align:center; color:#94a3b8; font-size:0.8rem; width:40px;">${index + 1}</td>
+      <td style="font-size:0.82rem;">${log.timestampStr || log.timestampISO || '-'}</td>
+      <td><b>${log.assetId}</b></td>
+      <td style="font-size:0.82rem;">${log.inspector || '-'}</td>
+      <td><span class="badge ${isPass ? 'badge-ready' : 'badge-issue'}">${isPass ? '✅ ปกติ' : '⚠️ ชำรุด'}</span></td>
+      <td>${log.photoURL ? `<a href="${log.photoURL}" target="_blank"><img class="img-thumb" src="${log.photoURL}" alt="ภาพหลักฐาน"></a>` : '-'}</td>
+      <td style="font-size:0.82rem;">${log.notes || '-'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ==========================================
 let map = null;
 let currentTileLayer = null;
 let currentOverlayLayer = null;
@@ -150,105 +165,18 @@ let currentMapMode = 'building_er_lower'; // เริ่มต้นที่�
 
 
 // ==========================================
-// 0. Auth Guard — บังคับ Login ก่อนเข้าใช้ (พร้อม Session Timeout 1 ชม. & Activity Tracking)
+// 0. Auth Guard — บังคับ Login ก่อนเข้าใช้ (เชื่อมต่อโมดูล js/auth.js)
 // ==========================================
 
-const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 1 ชั่วโมง (60 นาที)
-
-// ตรวจ session ที่ยังมีอยู่ และเช็คว่าหมดอายุหรือยัง (1 ชม. นับจากกิจกรรมล่าสุด)
-function getSession() {
-  try {
-    const raw = localStorage.getItem('pyh_active_session');
-    if (!raw) return null;
-    const session = JSON.parse(raw);
-    if (!session || !session.officer) return null;
-
-    const now = Date.now();
-    // ถ้ามี lastActivity ให้ตรวจ expiration
-    if (session.lastActivity) {
-      if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
-        // Session หมดอายุแล้ว!
-        console.warn("Session expired due to inactivity (> 1 hour).");
-        clearSession();
-        return null;
-      }
-    }
-
-    // อัปเดต timestamp กิจกรรมล่าสุด
-    updateSessionActivity();
-    return session;
-  } catch (e) { return null; }
-}
-
-function setSession(officer, role) {
-  const now = Date.now();
-  const sessionData = {
-    officer,
-    role,
-    loginAt: now,
-    lastActivity: now
-  };
-  localStorage.setItem('pyh_active_session', JSON.stringify(sessionData));
-  localStorage.setItem('pyh_officer', officer);
-  localStorage.setItem('pyh_role', role);
-}
-
-function clearSession() {
-  localStorage.removeItem('pyh_active_session');
-  localStorage.removeItem('pyh_officer');
-  localStorage.removeItem('pyh_role');
-}
-
-// อัปเดตเวลากิจกรรมล่าสุด (Activity Tracking)
-let _lastActivityUpdate = 0;
-function updateSessionActivity() {
-  const now = Date.now();
-  // throttle การเขียน localStorage ไม่ให้เขียนถี่เกินไป (ทุก 10 วินาที)
-  if (now - _lastActivityUpdate < 10000) return;
-  _lastActivityUpdate = now;
-
-  try {
-    const raw = localStorage.getItem('pyh_active_session');
-    if (raw) {
-      const session = JSON.parse(raw);
-      if (session && session.officer) {
-        session.lastActivity = now;
-        localStorage.setItem('pyh_active_session', JSON.stringify(session));
-      }
-    }
-  } catch (e) { }
-}
-
-// ตรวจสอบการหมดอายุของ Session เป็นระยะ (Periodic Expiration Checker)
-function checkSessionExpiration() {
-  try {
-    const raw = localStorage.getItem('pyh_active_session');
-    if (!raw) return;
-    const session = JSON.parse(raw);
-    if (session && session.lastActivity) {
-      if (Date.now() - session.lastActivity > SESSION_TIMEOUT_MS) {
-        console.warn("Session expired! Logging out automatically.");
-        clearSession();
-        currentOfficer = '';
-        currentUserRole = '';
-        if (typeof applyUserSession === 'function') {
-          applyUserSession('ผู้เยี่ยมชม (Guest)', 'guest');
-        }
-        alert("⏰ เซสชันของคุณหมดอายุเนื่องจากไม่มีการใช้งานเกิน 1 ชั่วโมง\nระบบได้ออกจากระบบเพื่อความปลอดภัย กรุณาเข้าสู่ระบบใหม่อีกครั้ง");
-        showLoginScreen();
-      }
-    }
-  } catch (e) { }
-}
-
-// ตั้ง Interval ตรวจสอบทุก 1 นาที
-setInterval(checkSessionExpiration, 60 * 1000);
-
-// ดักจับ User Activity (คลิก, แตะหน้าจอ, กดปุ่มคีย์บอร์ด, เลื่อนหน้าจอ) เพื่อรีเฟรชเวลา
-['click', 'keydown', 'touchstart', 'scroll'].forEach(eventType => {
-  window.addEventListener(eventType, () => {
-    updateSessionActivity();
-  }, { passive: true });
+initActivityTracker(() => {
+  console.warn("Session expired! Logging out automatically.");
+  currentOfficer = '';
+  currentUserRole = '';
+  if (typeof applyUserSession === 'function') {
+    applyUserSession('ผู้เยี่ยมชม (Guest)', 'guest');
+  }
+  alert("⏰ เซสชันของคุณหมดอายุเนื่องจากไม่มีการใช้งานเกิน 1 ชั่วโมง\nระบบได้ออกจากระบบเพื่อความปลอดภัย กรุณาเข้าสู่ระบบใหม่อีกครั้ง");
+  showLoginScreen();
 });
 
 function showLoginScreen() {
@@ -379,7 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (docSnap.exists()) {
           const cloudGuide = docSnap.data();
           if (cloudGuide && cloudGuide.feSteps && cloudGuide.emSteps) {
-            localStorage.setItem('pyh_inspection_guide', JSON.stringify(cloudGuide));
+            storageService.set('pyh_inspection_guide', cloudGuide);
             if (typeof window.renderInspectionGuideUI === 'function') {
               window.renderInspectionGuideUI();
             }
@@ -511,34 +439,37 @@ function deduplicateAssets(list) {
 // 2. จัดการข้อมูลอุปกรณ์ (Assets Initialization)
 // ==========================================
 async function initAssets() {
-  const localSaved = localStorage.getItem('pyh_assets_data');
+  const localSaved = storageService.get('pyh_assets_data');
   if (localSaved) {
     try {
-      assetsList = deduplicateAssets(JSON.parse(localSaved));
-      localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+      const parsed = typeof localSaved === 'string' ? JSON.parse(localSaved) : localSaved;
+      if (Array.isArray(parsed)) {
+        assetsList = deduplicateAssets(parsed);
+        storageService.set('pyh_assets_data', assetsList);
+      }
     } catch (e) {
       console.warn("Failed to parse local assets", e);
     }
   }
 
   // หากไม่มีข้อมูลและยังไม่เคยเริ่มระบบ ให้โหลดจาก initial_assets.json เป็นค่าเริ่มต้นครั้งแรก
-  const hasInitialized = localStorage.getItem('pyh_has_initialized');
+  const hasInitialized = storageService.get('pyh_has_initialized');
   if (!hasInitialized && (!assetsList || assetsList.length === 0)) {
     try {
       const resp = await fetch('initial_assets.json');
       const data = await resp.json();
       assetsList = deduplicateAssets(data.assets || []);
-      localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
-      localStorage.setItem('pyh_has_initialized', 'true');
+      storageService.set('pyh_assets_data', assetsList);
+      storageService.set('pyh_has_initialized', 'true');
     } catch (e) {
       console.error("Could not load initial_assets.json", e);
     }
   } else if (!hasInitialized && assetsList && assetsList.length > 0) {
-    localStorage.setItem('pyh_has_initialized', 'true');
+    storageService.set('pyh_has_initialized', 'true');
   }
 
   // โหลดประวัติการตรวจที่มีในเครื่อง
-  const localLogs = localStorage.getItem('pyh_inspection_logs');
+  const localLogs = storageService.get('pyh_inspection_logs');
   if (localLogs) {
     try {
       inspectionLogs = JSON.parse(localLogs);
@@ -564,11 +495,11 @@ async function initAssets() {
             rawAssets.push({ firestoreId: d.id, ...data, type: normalizedType });
           });
           assetsList = deduplicateAssets(rawAssets);
-          localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+          storageService.set('pyh_assets_data', assetsList);
         } else {
           // หากบน Cloud ว่างเปล่า (ถูกลบออกหมดแล้ว) ให้เคลียร์ข้อมูลในเครื่องด้วย
           assetsList = [];
-          localStorage.setItem('pyh_assets_data', JSON.stringify([]));
+          storageService.set('pyh_assets_data', []);
         }
         updateDashboardUI();
         renderMapPins();
@@ -589,27 +520,27 @@ async function initAssets() {
         if (docSnap.exists()) {
           const cloudCert = docSnap.data();
           if (cloudCert.tech_cert) {
-            localStorage.setItem('pyh_tech_certification', JSON.stringify(cloudCert.tech_cert));
+            storageService.set('pyh_tech_certification', cloudCert.tech_cert);
           } else if (cloudCert.tech_cert === null) {
-            localStorage.removeItem('pyh_tech_certification');
+            storageService.remove('pyh_tech_certification');
           }
 
           if (cloudCert.chef_cert) {
-            localStorage.setItem('pyh_chef_certification', JSON.stringify(cloudCert.chef_cert));
+            storageService.set('pyh_chef_certification', cloudCert.chef_cert);
           } else if (cloudCert.chef_cert === null) {
-            localStorage.removeItem('pyh_chef_certification');
+            storageService.remove('pyh_chef_certification');
           }
 
           if (cloudCert.exec_cert) {
-            localStorage.setItem('pyh_exec_certification', JSON.stringify(cloudCert.exec_cert));
+            storageService.set('pyh_exec_certification', cloudCert.exec_cert);
           } else if (cloudCert.exec_cert === null) {
-            localStorage.removeItem('pyh_exec_certification');
+            storageService.remove('pyh_exec_certification');
           }
 
           if (cloudCert.exec_decision) {
-            localStorage.setItem('pyh_executive_decision', JSON.stringify(cloudCert.exec_decision));
+            storageService.set('pyh_executive_decision', cloudCert.exec_decision);
           } else if (cloudCert.exec_decision === null) {
-            localStorage.removeItem('pyh_executive_decision');
+            storageService.remove('pyh_executive_decision');
           }
 
           // อัปเดต UI ที่แสดงผลทันทีทุกเครื่องที่เปิดอยู่
@@ -645,6 +576,30 @@ async function initAssets() {
   initMap();
   if (typeof window.autoSuggestRegisterId === 'function') {
     window.autoSuggestRegisterId();
+  }
+
+  // ตรวจสอบ URL พารามิเตอร์ ?scan= เพื่อเปิดแบบฟอร์มตรวจเช็กอุปกรณ์อัตโนมัติ (เช่น จาก LINE / Google Lens)
+  checkUrlScanParam();
+}
+
+// ฟังก์ชันตรวจสอบ ?scan= จาก URL และเปิดหน้าตรวจเช็กอัตโนมัติ
+let _hasCheckedUrlScan = false;
+function checkUrlScanParam() {
+  if (_hasCheckedUrlScan) return;
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const rawScan = urlParams.get('scan') || urlParams.get('id') || urlParams.get('assetId');
+    if (!rawScan) return;
+
+    const targetId = extractAssetIdFromScan(rawScan);
+    if (!targetId) return;
+
+    _hasCheckedUrlScan = true;
+    setTimeout(() => {
+      window.handleScanned(targetId);
+    }, 300);
+  } catch (e) {
+    console.warn("checkUrlScanParam error:", e);
   }
 }
 
@@ -855,7 +810,7 @@ window.startRelocatePin = function (assetId) {
         item.floorCoord = [newY, newX];
       }
 
-      localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+      storageService.set('pyh_assets_data', assetsList);
       if (isFirebaseReady() && db && item.firestoreId) {
         const updateData = (currentMapMode === 'campus') ? { campusCoord: item.campusCoord } : { floorCoord: item.floorCoord };
         updateDoc(doc(db, "assets", item.firestoreId), updateData).catch(err => console.warn(err));
@@ -1079,7 +1034,7 @@ window.submitQuickAddAsset = async function () {
 
   assetsList.push(newAsset);
   assetsList = deduplicateAssets(assetsList);
-  localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+  storageService.set('pyh_assets_data', assetsList);
 
   if (isFirebaseReady() && db) {
     try {
@@ -1124,7 +1079,7 @@ function renderMapPins() {
 
     let campusLandmarks = defaultLandmarks;
     try {
-      const savedLandmarks = localStorage.getItem('pyh_campus_landmarks');
+      const savedLandmarks = storageService.get('pyh_campus_landmarks');
       if (savedLandmarks) {
         const parsed = JSON.parse(savedLandmarks);
         campusLandmarks = defaultLandmarks.map(def => {
@@ -1137,7 +1092,7 @@ function renderMapPins() {
     window.saveCampusLandmarkCoord = function(bldgId, newLat, newLng) {
       let saved = [];
       try {
-        const raw = localStorage.getItem('pyh_campus_landmarks');
+        const raw = storageService.get('pyh_campus_landmarks');
         if (raw) saved = JSON.parse(raw);
       } catch (e) { }
       const idx = saved.findIndex(s => s.id === bldgId);
@@ -1147,7 +1102,7 @@ function renderMapPins() {
       } else {
         saved.push({ id: bldgId, lat: newLat, lng: newLng });
       }
-      localStorage.setItem('pyh_campus_landmarks', JSON.stringify(saved));
+      storageService.set('pyh_campus_landmarks', saved);
       if (isFirebaseReady() && db) {
         setDoc(doc(db, "system_settings", "campus_landmarks"), { landmarks: saved }, { merge: true }).catch(err => console.warn(err));
       }
@@ -1234,7 +1189,7 @@ function renderMapPins() {
           if (map) map.dragging.enable();
           const newLatLng = e.target.getLatLng();
           item.campusCoord = { lat: newLatLng.lat, lng: newLatLng.lng };
-          localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+          storageService.set('pyh_assets_data', assetsList);
           if (isFirebaseReady() && db && item.firestoreId) {
             updateDoc(doc(db, "assets", item.firestoreId), { campusCoord: item.campusCoord }).catch(err => console.warn(err));
           }
@@ -1310,7 +1265,7 @@ function renderMapPins() {
           const newY = Math.round(newLatLng.lat);
           const newX = Math.round(newLatLng.lng);
           item.floorCoord = [newY, newX];
-          localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+          storageService.set('pyh_assets_data', assetsList);
           if (isFirebaseReady() && db && item.firestoreId) {
             updateDoc(doc(db, "assets", item.firestoreId), { floorCoord: [newY, newX] }).catch(err => console.warn(err));
           }
@@ -1520,7 +1475,7 @@ const DEFAULT_INSPECTION_GUIDE = {
 
 function getStoredInspectionGuide() {
   try {
-    const raw = localStorage.getItem('pyh_inspection_guide');
+    const raw = storageService.get('pyh_inspection_guide');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed.feSteps && parsed.emSteps) return parsed;
@@ -1618,7 +1573,7 @@ window.submitEditGuide = async function () {
       submitBtn.disabled = true;
     }
 
-    localStorage.setItem('pyh_inspection_guide', JSON.stringify(newGuide));
+    storageService.set('pyh_inspection_guide', newGuide);
 
     // ซิงก์ขึ้น Firestore (ถ้าพร้อมใช้งาน)
     if (isFirebaseReady() && db) {
@@ -1684,9 +1639,11 @@ window.stopScanner = function () {
 // ==========================================
 // 5. จัดการแบบฟอร์มตรวจสอบ (Checklist FE vs EM)
 // ==========================================
-window.handleScanned = function (assetId) {
+window.handleScanned = function (rawInput) {
+  if (!rawInput) return;
+  const assetId = extractAssetIdFromScan(rawInput);
   if (!requireLogin('บันทึกผลการตรวจ')) return;
-  const asset = assetsList.find(a => a.assetId.toLowerCase() === assetId.toLowerCase());
+  const asset = assetsList.find(a => a.assetId && a.assetId.toLowerCase() === assetId.toLowerCase());
   if (!asset) {
     alert(`ไม่พบอุปกรณ์รหัส "${assetId}" ในระบบ กรุณาตรวจสอบหรือลงทะเบียนใหม่`);
     return;
@@ -1808,14 +1765,14 @@ if (inspectForm) {
         });
       }
       inspectionLogs.unshift(logEntry);
-      localStorage.setItem('pyh_inspection_logs', JSON.stringify(inspectionLogs));
+      storageService.set('pyh_inspection_logs', inspectionLogs);
 
       // 2. อัปเดตสถานะใน Assets List
       assetsList[assetIndex].status = isPass ? "READY" : "ISSUE";
       assetsList[assetIndex].lastChecked = now.toISOString();
       assetsList[assetIndex].lastInspector = inspectorName;
       assetsList[assetIndex].lastPhoto = photoURL;
-      localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+      storageService.set('pyh_assets_data', assetsList);
 
       if (isFirebaseReady() && db && assetsList[assetIndex].firestoreId) {
         await updateDoc(doc(db, "assets", assetsList[assetIndex].firestoreId), {
@@ -1903,290 +1860,20 @@ function readFileAsDataURL(file) {
 }
 
 // ==========================================
-// 6. ลงทะเบียนอุปกรณ์ใหม่ & พิมพ์ QR Code (พร้อมแผนที่เลือกพิกัด)
-// ==========================================
-let registerMap = null;
-let registerMarker = null;
-let registerOverlayLayer = null;
-let registerExistingMarkers = [];
+// ========================================== //
+// 6. ลงทะเบียนอุปกรณ์ใหม่ (แยกไปที่ js/register-controller.js)
+// ========================================== //
+initRegisterController({
+  getAssetsList: () => assetsList,
+  setAssetsList: (val) => { assetsList = val; },
+  requireLogin: (act) => requireLogin(act),
+  updateDashboardUI: () => updateDashboardUI(),
+  renderMapPins: () => renderMapPins(),
+  isFirebaseReady: () => isFirebaseReady(),
+  db: db
+});
 
-window.initRegisterMap = function () {
-  const regMapElem = document.getElementById('register-map');
-  if (!regMapElem) return;
-
-  if (!registerMap) {
-    registerMap = L.map('register-map', {
-      crs: L.CRS.Simple,
-      minZoom: -1,
-      maxZoom: 1
-    });
-
-    registerMap.on('click', function (e) {
-      const y = Math.round(e.latlng.lat);
-      const x = Math.round(e.latlng.lng);
-      setRegisterCoords(y, x);
-    });
-  }
-
-  window.updateRegisterMapFloor();
-};
-
-window.renderRegisterExistingMarkers = function () {
-  if (!registerMap) return;
-
-  // ล้างหมุดอุปกรณ์เดิมออกก่อน
-  registerExistingMarkers.forEach(m => {
-    if (registerMap.hasLayer(m)) registerMap.removeLayer(m);
-  });
-  registerExistingMarkers = [];
-
-  const buildingSelect = document.getElementById('reg-building-select');
-  if (!buildingSelect) return;
-  const buildingId = buildingSelect.value;
-
-  // กรองอุปกรณ์เดิมที่อยู่ในอาคารนี้และมี floorCoord
-  const existingAssets = (assetsList || []).filter(a => a.buildingId === buildingId && a.floorCoord && Array.isArray(a.floorCoord));
-
-  // อัปเดตข้อความสถิติอุปกรณ์เดิม
-  const countBadge = document.getElementById('reg-existing-count-badge');
-  if (countBadge) {
-    countBadge.innerText = `📦 มีอุปกรณ์เดิมในอาคารนี้ ${existingAssets.length} จุด`;
-  }
-
-  existingAssets.forEach(item => {
-    const isReady = item.status === 'READY';
-    const statusColor = isReady ? '#16a34a' : '#dc2626';
-
-    const existingIcon = L.divIcon({
-      html: `
-        <div style="background:${statusColor}; border:2px solid #ffffff; box-shadow:0 0 6px rgba(0,0,0,0.45); width:14px; height:14px; border-radius:50%; opacity:0.88;" title="[อุปกรณ์เดิม] ${item.assetId} - ${item.location}"></div>
-      `,
-      className: 'existing-asset-pin-container',
-      iconSize: [14, 14],
-      iconAnchor: [7, 7]
-    });
-
-    const m = L.marker(item.floorCoord, {
-      icon: existingIcon,
-      interactive: true,
-      zIndexOffset: 10
-    }).addTo(registerMap);
-
-    m.bindPopup(`
-      <div style="font-size:12px; line-height:1.4;">
-        <span style="display:inline-block; background:#f1f5f9; color:#475569; font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px; border:1px solid #cbd5e1; margin-bottom:4px;">📌 อุปกรณ์เดิมในระบบ</span><br>
-        <b style="color:#0f172a;">${item.assetId}</b><br>
-        <span style="color:#334155;">${item.type || 'อุปกรณ์ความปลอดภัย'}</span><br>
-        <span style="color:#64748b; font-size:11px;">จุดติดตั้ง: ${item.location || '-'} (ชั้น ${item.floor || 1})</span><br>
-        <span style="color:${statusColor}; font-weight:600; font-size:11px;">สถานะ: ${isReady ? 'พร้อมใช้งาน' : 'ต้องตรวจสอบ/ชำรุด'}</span>
-      </div>
-    `);
-
-    registerExistingMarkers.push(m);
-  });
-};
-
-window.updateRegisterMapFloor = function () {
-  if (!registerMap) return;
-  const buildingSelect = document.getElementById('reg-building-select');
-  if (!buildingSelect) return;
-  const buildingId = buildingSelect.value;
-  const cfg = floorConfigs[buildingId];
-  if (!cfg) return;
-
-  if (registerOverlayLayer && registerMap.hasLayer(registerOverlayLayer)) {
-    registerMap.removeLayer(registerOverlayLayer);
-  }
-
-  registerOverlayLayer = L.imageOverlay(cfg.imageUrl, cfg.bounds).addTo(registerMap);
-  registerMap.options.maxBoundsViscosity = 1.0;
-  registerMap.setMaxBounds(cfg.bounds);
-  registerMap.setMaxZoom(3);
-  registerMap.fitBounds(cfg.bounds);
-  const regFitZoom = registerMap.getBoundsZoom(cfg.bounds);
-  registerMap.setMinZoom(regFitZoom);
-
-  // แสดงหมุดอุปกรณ์เดิมที่มีอยู่ในอาคารนี้
-  window.renderRegisterExistingMarkers();
-
-  const curY = parseInt(document.getElementById('reg-coord-y').value) || 280;
-  const curX = parseInt(document.getElementById('reg-coord-x').value) || 500;
-  setRegisterCoords(curY, curX);
-  setTimeout(() => {
-    registerMap.invalidateSize();
-    const updatedZoom = registerMap.getBoundsZoom(cfg.bounds);
-    registerMap.setMinZoom(updatedZoom);
-  }, 250);
-};
-
-function setRegisterCoords(y, x) {
-  const yInput = document.getElementById('reg-coord-y');
-  const xInput = document.getElementById('reg-coord-x');
-  const badge = document.getElementById('reg-coord-badge');
-
-  if (yInput) yInput.value = y;
-  if (xInput) xInput.value = x;
-  if (badge) badge.innerText = 'พิกัดผัง: Y: ' + y + ', X: ' + x;
-
-  if (registerMarker && registerMap && registerMap.hasLayer(registerMarker)) {
-    registerMap.removeLayer(registerMarker);
-  }
-
-  if (registerMap) {
-    const pinIcon = L.divIcon({
-      html: '<div class="admin-draggable-pin" style="background:#0284c7; border:2.5px solid #ffffff; box-shadow:0 0 10px rgba(2,132,199,0.7); width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:11px; font-weight:bold; cursor:grab;">★</div>',
-      className: 'custom-pin-container',
-      iconSize: [24, 24],
-      iconAnchor: [12, 12]
-    });
-
-    registerMarker = L.marker([y, x], {
-      icon: pinIcon,
-      draggable: true,
-      zIndexOffset: 1000,
-      title: 'หมุดอุปกรณ์ใหม่ (คลิกลากเพื่อกำหนดตำแหน่งติดตั้ง)'
-    }).addTo(registerMap);
-
-    registerMarker.on('dragend', function (e) {
-      const latlng = e.target.getLatLng();
-      const newY = Math.round(latlng.lat);
-      const newX = Math.round(latlng.lng);
-      if (yInput) yInput.value = newY;
-      if (xInput) xInput.value = newX;
-      if (badge) badge.innerText = 'พิกัดผัง: Y: ' + newY + ', X: ' + newX;
-    });
-  }
-}
-
-const regForm = document.getElementById('reg-form');
-if (regForm) {
-  regForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const assetId = document.getElementById('reg-id').value.trim();
-    if (!assetId) {
-      alert("กรุณาระบุรหัสประจำอุปกรณ์");
-      return;
-    }
-
-    if (assetsList.some(a => a.assetId?.trim().toUpperCase() === assetId.toUpperCase())) {
-      alert(`⚠️ ขออภัย: รหัสอุปกรณ์ "${assetId}" มีอยู่ในระบบแล้ว กรุณาใช้รหัสอื่น`);
-      return;
-    }
-
-    const type = document.getElementById('reg-type').value;
-    const buildingSelect = document.getElementById('reg-building-select');
-    const buildingId = buildingSelect.value;
-    const buildingName = buildingSelect.options[buildingSelect.selectedIndex].text;
-    const location = document.getElementById('reg-location').value.trim();
-    const floor = parseInt(document.getElementById('reg-floor').value) || 1;
-
-    // คำนวณพิกัดจากหมุดที่กำหนดไว้บนแผนที่
-    const coordY = parseInt(document.getElementById('reg-coord-y').value) || 280;
-    const coordX = parseInt(document.getElementById('reg-coord-x').value) || 500;
-    const floorCoord = [coordY, coordX];
-    const campusCoord = { lat: 15.47712, lng: 100.13777 };
-
-    const newAsset = {
-      assetId,
-      type,
-      building: buildingName,
-      buildingId,
-      floor,
-      location,
-      status: "READY",
-      floorCoord,
-      campusCoord,
-      createdAt: new Date().toISOString()
-    };
-
-    if (isFirebaseReady() && db) {
-      try {
-        const docId = assetId.replace(/[^a-zA-Z0-9]/g, '_');
-        await setDoc(doc(db, "assets", docId), {
-          ...newAsset,
-          serverCreated: serverTimestamp()
-        });
-        newAsset.firestoreId = docId;
-      } catch (err) {
-        console.warn("Firestore add error:", err);
-      }
-    }
-
-    assetsList.push(newAsset);
-    assetsList = deduplicateAssets(assetsList);
-    localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
-
-    // แสดง QR Code
-    const qrContainer = document.getElementById('qrcode');
-    qrContainer.innerHTML = "";
-    new QRCode(qrContainer, {
-      text: assetId,
-      width: 150,
-      height: 150,
-      colorDark: "#000000",
-      colorLight: "#ffffff"
-    });
-
-    document.getElementById('qr-label').innerHTML = `
-      <b>${assetId}</b><br>
-      ${type}<br>
-      ${buildingName} - ${location}
-    `;
-    document.getElementById('qr-output').classList.remove('hidden');
-
-    updateDashboardUI();
-    renderMapPins();
-    if (typeof window.renderRegisterExistingMarkers === 'function') {
-      window.renderRegisterExistingMarkers();
-    }
-    alert(`ลงทะเบียนอุปกรณ์ ${assetId} สำเร็จ! พร้อมพิมพ์สติกเกอร์`);
-
-    document.getElementById('reg-location').value = '';
-    if (typeof window.autoSuggestRegisterId === 'function') {
-      window.autoSuggestRegisterId();
-    }
-  });
-}
-
-// ==========================================
 // 7. ประวัติการตรวจ (Audit Trail)
-// ==========================================
-window.renderHistoryTable = function () {
-  const tbody = document.getElementById('history-rows');
-  if (!tbody) return;
-  tbody.innerHTML = "";
-
-  const filterStatus = document.getElementById('history-filter-status')?.value || '';
-  const keyword = (document.getElementById('history-search')?.value || '').toLowerCase();
-
-  let logs = [...inspectionLogs];
-
-  // กรองตามสถานะ
-  if (filterStatus) logs = logs.filter(l => l.status === filterStatus);
-  // กรองตามรหัสอุปกรณ์
-  if (keyword) logs = logs.filter(l => l.assetId?.toLowerCase().includes(keyword));
-
-  if (logs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#64748b; padding:20px;">ไม่พบรายการที่ตรงกัน</td></tr>`;
-    return;
-  }
-
-  logs.slice(0, 100).forEach((log, index) => {
-    const isPass = log.status === 'READY';
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td style="text-align:center; color:#94a3b8; font-size:0.8rem; width:40px;">${index + 1}</td>
-      <td style="font-size:0.82rem;">${log.timestampStr || log.timestampISO || '-'}</td>
-      <td><b>${log.assetId}</b></td>
-      <td style="font-size:0.82rem;">${log.inspector || '-'}</td>
-      <td><span class="badge ${isPass ? 'badge-ready' : 'badge-issue'}">${isPass ? '✅ ปกติ' : '⚠️ ชำรุด'}</span></td>
-      <td>${log.photoURL ? `<a href="${log.photoURL}" target="_blank"><img class="img-thumb" src="${log.photoURL}" alt="ภาพหลักฐาน"></a>` : '-'}</td>
-      <td style="font-size:0.82rem;">${log.notes || '-'}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
 // ==========================================
 // 7.5 ตารางรายการอุปกรณ์ + QR Code
 // ==========================================
@@ -2324,12 +2011,12 @@ window.renderAssetListTable = function () {
     </tr>`;
   }).join('');
 
-  // สร้าง QR เล็กๆ ในแต่ละแถว
+  // สร้าง QR เล็กๆ ในแต่ละแถว (สร้างด้วย Direct URL ให้สแกนเปิดได้ทันที)
   filtered.forEach(a => {
     const containerId = `qr-mini-${a.assetId.replace(/[^a-zA-Z0-9]/g, '-')}`;
     const el = document.getElementById(containerId);
     if (el && el.innerHTML === '') {
-      try { new QRCode(el, { text: a.assetId, width: 48, height: 48 }); } catch (e) { }
+      try { new QRCode(el, { text: getAssetDirectUrl(a.assetId), width: 48, height: 48 }); } catch (e) { }
     }
   });
 };
@@ -2364,8 +2051,8 @@ window.markAssetRepairing = async function (assetId) {
   };
 
   inspectionLogs.unshift(repairLog);
-  localStorage.setItem('pyh_inspection_logs', JSON.stringify(inspectionLogs));
-  localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+  storageService.set('pyh_inspection_logs', inspectionLogs);
+  storageService.set('pyh_assets_data', assetsList);
 
   if (isFirebaseReady() && db) {
     try {
@@ -2457,8 +2144,8 @@ window.submitAssetRepaired = async function () {
     };
 
     inspectionLogs.unshift(logEntry);
-    localStorage.setItem('pyh_inspection_logs', JSON.stringify(inspectionLogs));
-    localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+    storageService.set('pyh_inspection_logs', inspectionLogs);
+    storageService.set('pyh_assets_data', assetsList);
 
     if (isFirebaseReady() && db) {
       if (asset.firestoreId) {
@@ -2597,7 +2284,7 @@ window.submitEditAsset = async function () {
     asset.updatedAt = new Date().toISOString();
 
     // บันทึกลง LocalStorage
-    localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+    storageService.set('pyh_assets_data', assetsList);
 
     // หากมีการเปลี่ยนรหัสอุปกรณ์ ให้อัปเดตรหัสในประวัติการตรวจ (inspectionLogs) ด้วย เพื่อไม่ให้ประวัติหลุด
     if (oldAssetId.toUpperCase() !== newAssetId.toUpperCase()) {
@@ -2606,7 +2293,7 @@ window.submitEditAsset = async function () {
           l.assetId = newAssetId;
         }
       });
-      localStorage.setItem('pyh_inspection_logs', JSON.stringify(inspectionLogs));
+      storageService.set('pyh_inspection_logs', inspectionLogs);
     }
 
     // ซิงค์ Cloud Database (Firestore) หากเปิดใช้งานอยู่
@@ -2682,7 +2369,7 @@ window.adminDeleteAsset = async function (assetId) {
 
     // ลบจาก Local Array
     assetsList.splice(assetIndex, 1);
-    localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+    storageService.set('pyh_assets_data', assetsList);
 
     alert(`🗑️ ลบอุปกรณ์ [${assetId}] ออกจากระบบเรียบร้อยแล้ว`);
     renderAssetListTable();
@@ -2735,7 +2422,7 @@ window.adminDeleteAllAssets = async function () {
 
     // 2. เคลียร์ข้อมูลอุปกรณ์ใน LocalStorage และ Array
     assetsList = [];
-    localStorage.setItem('pyh_assets_data', JSON.stringify([]));
+    storageService.set('pyh_assets_data', []);
 
     // 3. อัปเดต UI ทั้งระบบ
     updateDashboardUI();
@@ -2811,7 +2498,7 @@ window.showQRModal = function (assetId) {
   canvas.innerHTML = '';
 
   new QRCode(canvas, {
-    text: asset.assetId,
+    text: getAssetDirectUrl(asset.assetId),
     width: 200,
     height: 200,
     colorDark: '#000000',
@@ -2899,9 +2586,11 @@ window.printAllQR = function () {
     <body><div class="grid">${items}</div>
     <script>
       const assets = ${JSON.stringify(filtered)};
+      const baseUrl = ${JSON.stringify(getAssetDirectUrl('__ID__'))};
       assets.forEach(a => {
         const el = document.getElementById('qr-' + a.assetId.replace(/[^a-zA-Z0-9]/g,'-'));
-        if (el) new QRCode(el, { text: a.assetId, width: 120, height: 120 });
+        const directUrl = baseUrl.replace('__ID__', encodeURIComponent(a.assetId));
+        if (el) new QRCode(el, { text: directUrl, width: 120, height: 120 });
       });
       setTimeout(() => window.print(), 1200);
     <\/script></body></html>`);
@@ -3029,7 +2718,7 @@ window.cleanDuplicateAssetsFromCloud = async function () {
     // 2. เคลียร์ใน LocalStorage
     const beforeCount = assetsList.length;
     assetsList = deduplicateAssets(assetsList);
-    localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+    storageService.set('pyh_assets_data', assetsList);
     const localRemoved = beforeCount - assetsList.length;
 
     updateDashboardUI();
@@ -3078,11 +2767,11 @@ window.importSystemData = function (event) {
       if (!confirm(`พบข้อมูลอุปกรณ์ ${data.assets.length} จุด ยืนยันการนำเข้าข้อมูลหรือไม่?`)) return;
 
       assetsList = deduplicateAssets(data.assets);
-      localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
+      storageService.set('pyh_assets_data', assetsList);
 
       if (data.inspection_logs) {
         inspectionLogs = data.inspection_logs;
-        localStorage.setItem('pyh_inspection_logs', JSON.stringify(inspectionLogs));
+        storageService.set('pyh_inspection_logs', inspectionLogs);
       }
 
       // หากมี Firebase พร้อม ให้บันทึกลง Cloud
@@ -3768,2245 +3457,64 @@ window.addEventListener('DOMContentLoaded', () => {
   if (isFirebaseReady() && auth) {
     onAuthStateChanged(auth, async (user) => {
       if (user) {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists()) {
-          const profile = userDoc.data();
-          currentOfficer = getCleanName(profile.name);
+        // ตรวจสอบข้อมูลสิทธิ์จริงจาก system_users บน Firestore (Server-Validated)
+        const docId = user.email ? user.email.replace(/[^a-zA-Z0-9]/g, '_') : user.uid;
+        let profile = null;
+        try {
+          const userDoc = await getDoc(doc(db, "system_users", docId));
+          if (userDoc.exists()) {
+            profile = userDoc.data();
+          }
+        } catch (e) {
+          console.warn("Could not fetch server profile:", e.message);
+        }
+
+        if (profile) {
+          currentOfficer = getCleanName(profile.name || user.displayName || user.email);
           currentUserRole = profile.role || 'inspector';
-          saveUserSession(currentOfficer, currentUserRole);
-          document.getElementById('auth-modal').classList.add('hidden');
+        } else {
+          currentOfficer = user.email;
+          currentUserRole = 'inspector';
+        }
+        saveUserSession(currentOfficer, currentUserRole);
+        document.getElementById('auth-modal')?.classList.add('hidden');
+      } else {
+        // ถ้า Firebase Auth แจ้งว่าไม่ได้ Login แต่เครื่องมี session ปลอม ให้เคลียร์ทิ้งทันที
+        const session = getSession();
+        if (session && isFirebaseReady()) {
+          console.warn("Security check: Firebase session is inactive. Reverting to Guest mode.");
+          clearSession();
+          currentOfficer = '';
+          currentUserRole = 'guest';
+          applyUserSession('ผู้เยี่ยมชม (Guest)', 'guest');
         }
       }
     });
   }
 });
 
-// ==========================================
-// 11. ระบบสร้างรายงานการตรวจสอบเพื่อเสนอผู้บริหาร (Executive Inspection Report)
-// ==========================================
-
-const buildingMetadata = {
-  building_er_lower: { name: 'อาคารอุบัติเหตุ (ชั้นล่าง)', short: 'ER ล่าง' },
-  building_er_upper: { name: 'อาคารอุบัติเหตุ (ชั้นบน)', short: 'ER บน' },
-  building_hpc: { name: 'อาคารส่งเสริมสุขภาพ', short: 'ส่งเสริมฯ' },
-  building_ipd: { name: 'อาคารผู้ป่วยใน (IPD)', short: 'IPD' },
-  building_nisit: { name: 'อาคารนิสิตคุณากร (Covid 19)', short: 'นิสิตคุณากร' },
-  building_opd_dm: { name: 'ตึกแก้วกัลยา (ผู้ป่วยนอก OPD)', short: 'ตึกแก้วกัลยา' },
-  building_pharma_rehab: { name: 'อาคารเวชศาสตร์ฟื้นฟู-โภชนาการ-คลังยา-จ่ายกลาง', short: 'เวชศาสตร์ฯ-คลังยา' },
-  building_thai_med: { name: 'อาคารแพทย์แผนไทย', short: 'แพทย์แผนไทย' },
-  building_canteen: { name: 'อาคารโรงอาหาร', short: 'โรงอาหาร' }
-};
-
-// สถานะการจัดรูปแบบรายงานและเอกสาร
-let currentReportFormat = 'memo'; // 'memo' = บันทึกข้อความราชการ, 'detailed' = รายงานสถิติละเอียด
-let memoLineSpacing = 1.45; // ระยะห่างบรรทัด
-// ระยะขอบ 4 ทิศทาง (มาตรฐานงานสารบรรณไทย: บน 2.0 ซม., ซ้าย 2.5 ซม., ขวา 2.0 ซม., ล่าง 2.0 ซม.)
-let memoMargins = {
-  top: 2.0,
-  bottom: 2.0,
-  left: 2.5,
-  right: 2.0
-};
-let memoMarginCm = 2.5; // fallback compat
-let memoExecBoxPosition = 'left'; // 'left' = ซ้ายล่าง, 'right' = ขวาล่าง
-let memoExecBoxOffset = { x: 0, y: 0 }; // ลากอิสระด้วยเมาส์
-let memoExecBoxMarginTop = 16; // px
-let memoChefBoxOffset = { x: 0, y: 0 }; // ลากอิสระสำหรับกล่องหัวหน้ากลุ่มงาน
-
-// การปรับขนาดตัวอักษรแยกเฉพาะส่วน (Granular Font Sizes)
-let memoFontConfig = {
-  title: 29,  // ข้อความ "บันทึกข้อความ"
-  header: 16, // หัวหนังสือ: ส่วนราชการ, ที่, วันที่, เรื่อง, เรียน
-  body: 16,   // เนื้อหา: ความเป็นมา, ข้อพิจารณา, ข้อเสนอ
-  sign: 15    // ส่วนลงนาม: ผู้รายงาน, กล่องเสนอ ผอ., คำสั่งการ ผอ.
-};
-
-// ฟังก์ชันปรับขนาดฟอนต์แบบตรงตามค่าตัวเลข (พิมพ์เลขได้เหมือน MS Word)
-window.setMemoFontExact = function(val) {
-  const target = document.getElementById('memo-font-target')?.value || 'all';
-  const size = Math.max(8, Math.min(48, parseFloat(val) || 16));
-
-  if (target === 'all') {
-    memoFontConfig.header = size;
-    memoFontConfig.body = size;
-    memoFontConfig.sign = Math.max(8, size - 1);
-  } else {
-    memoFontConfig[target] = size;
-  }
-
-  window.updateMemoFontDisplay();
-  window.applyMemoStyles();
-};
-
-// ฟังก์ชันปรับระยะขอบ 4 ด้านแบบระบุตัวเลขโดยตรง (Top / Bottom / Left / Right)
-window.setMemoMarginExact = function(side, val) {
-  const num = Math.max(0.5, Math.min(5.0, parseFloat(val) || 2.0));
-  if (memoMargins[side] !== undefined) {
-    memoMargins[side] = parseFloat(num.toFixed(1));
-  }
-  window.applyMemoStyles();
-};
-
-// คืนค่าระยะขอบเป็นมาตรฐานหนังสือราชการไทย (บน 2.0, ล่าง 2.0, ซ้าย 2.5, ขวา 2.0 ซม.)
-window.setMemoMarginPresetStandard = function() {
-  memoMargins = {
-    top: 2.0,
-    bottom: 2.0,
-    left: 2.5,
-    right: 2.0
-  };
-  window.applyMemoStyles();
-};
-
-// จัดการตำแหน่งกล่องคำสั่งการของ ผอ.
-window.setExecBoxPosition = function(pos) {
-  memoExecBoxPosition = pos;
-  memoExecBoxOffset = { x: 0, y: 0 }; // รีเซ็ตการลากเมื่อกดสลับฝั่ง
-  const btnLeft = document.getElementById('btn-exec-pos-left');
-  const btnRight = document.getElementById('btn-exec-pos-right');
-  if (btnLeft && btnRight) {
-    if (pos === 'left') {
-      btnLeft.style.background = '#ffffff';
-      btnLeft.style.color = '#004d40';
-      btnLeft.style.fontWeight = '700';
-      btnRight.style.background = 'rgba(255,255,255,0.2)';
-      btnRight.style.color = '#ffffff';
-      btnRight.style.fontWeight = '600';
-    } else {
-      btnRight.style.background = '#ffffff';
-      btnRight.style.color = '#004d40';
-      btnRight.style.fontWeight = '700';
-      btnLeft.style.background = 'rgba(255,255,255,0.2)';
-      btnLeft.style.color = '#ffffff';
-      btnLeft.style.fontWeight = '600';
-    }
-  }
-  window.renderOfficialMemo();
-};
-
-window.adjustExecBoxMarginTop = function(delta) {
-  memoExecBoxMarginTop = Math.max(-20, Math.min(80, memoExecBoxMarginTop + delta));
-  const box = document.getElementById('memo-exec-box-card');
-  if (box) box.style.marginTop = `${memoExecBoxMarginTop}px`;
-};
-
-// ระบบลากย้ายกล่องคำสั่งการ ผอ. ด้วยเมาส์ / สัมผัส (Drag & Drop)
-let isDraggingExecBox = false;
-let dragStartX = 0;
-let dragStartY = 0;
-let boxStartOffsetX = 0;
-let boxStartOffsetY = 0;
-
-window.initExecBoxDraggable = function() {
-  const box = document.getElementById('memo-exec-box-card');
-  const handle = document.getElementById('memo-exec-box-drag-handle');
-  if (!box) return;
-
-  const targetEl = handle || box;
-
-  const onStart = (e) => {
-    // ไม่ลากเมื่อคลิกที่ปุ่ม, input หรือข้อความที่คลิกได้
-    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('span[onclick]')) {
-      return;
-    }
-    isDraggingExecBox = true;
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    dragStartX = clientX;
-    dragStartY = clientY;
-    boxStartOffsetX = memoExecBoxOffset.x || 0;
-    boxStartOffsetY = memoExecBoxOffset.y || 0;
-
-    box.style.cursor = 'grabbing';
-    box.style.zIndex = '30';
-    box.style.opacity = '0.92';
-    box.style.boxShadow = '0 10px 25px rgba(0,0,0,0.15)';
-    e.preventDefault();
-  };
-
-  const onMove = (e) => {
-    if (!isDraggingExecBox) return;
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const dx = clientX - dragStartX;
-    const dy = clientY - dragStartY;
-
-    memoExecBoxOffset.x = Math.round(boxStartOffsetX + dx);
-    memoExecBoxOffset.y = Math.round(boxStartOffsetY + dy);
-
-    box.style.transform = `translate(${memoExecBoxOffset.x}px, ${memoExecBoxOffset.y}px)`;
-  };
-
-  const onEnd = () => {
-    if (!isDraggingExecBox) return;
-    isDraggingExecBox = false;
-    box.style.cursor = 'grab';
-    box.style.zIndex = '1';
-    box.style.opacity = '1';
-    box.style.boxShadow = 'none';
-
-    // บันทึกตำแหน่งกล่อง ผอ. ลงใน localStorage
-    try {
-      localStorage.setItem('pyh_memo_exec_box_offset', JSON.stringify(memoExecBoxOffset));
-    } catch(e) {}
-  };
-
-  targetEl.onmousedown = onStart;
-  targetEl.ontouchstart = onStart;
-
-  window.addEventListener('mousemove', onMove);
-  window.addEventListener('touchmove', onMove, { passive: false });
-  window.addEventListener('mouseup', onEnd);
-  window.addEventListener('touchend', onEnd);
-};
-
-// ระบบลากย้ายกล่องเสนอ ผอ. (หน.กลุ่มงาน) ด้วยเมาส์ / สัมผัส (Drag & Drop)
-let isDraggingChefBox = false;
-let chefDragStartX = 0;
-let chefDragStartY = 0;
-let chefBoxStartOffsetX = 0;
-let chefBoxStartOffsetY = 0;
-
-window.initChefBoxDraggable = function() {
-  const box = document.getElementById('memo-chef-box-card');
-  const handle = document.getElementById('memo-chef-box-drag-handle');
-  if (!box) return;
-
-  const targetEl = handle || box;
-
-  const onStart = (e) => {
-    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('span[onclick]')) {
-      return;
-    }
-    isDraggingChefBox = true;
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    chefDragStartX = clientX;
-    chefDragStartY = clientY;
-    chefBoxStartOffsetX = memoChefBoxOffset.x || 0;
-    chefBoxStartOffsetY = memoChefBoxOffset.y || 0;
-
-    box.style.cursor = 'grabbing';
-    box.style.zIndex = '30';
-    box.style.opacity = '0.92';
-    box.style.boxShadow = '0 10px 25px rgba(0,0,0,0.15)';
-    e.preventDefault();
-  };
-
-  const onMove = (e) => {
-    if (!isDraggingChefBox) return;
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const dx = clientX - chefDragStartX;
-    const dy = clientY - chefDragStartY;
-
-    memoChefBoxOffset.x = Math.round(chefBoxStartOffsetX + dx);
-    memoChefBoxOffset.y = Math.round(chefBoxStartOffsetY + dy);
-
-    box.style.transform = `translate(${memoChefBoxOffset.x}px, ${memoChefBoxOffset.y}px)`;
-  };
-
-  const onEnd = () => {
-    if (!isDraggingChefBox) return;
-    isDraggingChefBox = false;
-    box.style.cursor = 'grab';
-    box.style.zIndex = '1';
-    box.style.opacity = '1';
-    box.style.boxShadow = 'none';
-
-    try {
-      localStorage.setItem('pyh_memo_chef_box_offset', JSON.stringify(memoChefBoxOffset));
-    } catch(e) {}
-  };
-
-  targetEl.onmousedown = onStart;
-  targetEl.ontouchstart = onStart;
-
-  window.addEventListener('mousemove', onMove);
-  window.addEventListener('touchmove', onMove, { passive: false });
-  window.addEventListener('mouseup', onEnd);
-  window.addEventListener('touchend', onEnd);
-};
-
-// ==============================================
-// ระบบบันทึกลายมือชื่อเจ้าหน้าที่ (Signature Pad)
-// ==============================================
-let sigCanvas = null;
-let sigCtx = null;
-let isDrawingSig = false;
-let currentSigDataUrl = null;
-let sigTargetRole = 'inspector'; // 'inspector' or 'executive'
-
-window.openSignatureModal = function(target = 'inspector') {
-  sigTargetRole = target;
-  currentSigDataUrl = null;
-  const modal = document.getElementById('signature-modal');
-  if (!modal) return;
-
-  const modalTitle = document.getElementById('signature-modal-title');
-  const modalSubtitle = document.getElementById('signature-modal-subtitle');
-  if (modalTitle) {
-    if (target === 'executive') {
-      modalTitle.innerText = 'บันทึกลายมือชื่อผู้อำนวยการ';
-    } else if (target === 'chef') {
-      modalTitle.innerText = 'บันทึกลายมือชื่อหัวหน้ากลุ่มงานบริหารทั่วไป';
-    } else {
-      modalTitle.innerText = 'บันทึกลายมือชื่อเจ้าหน้าที่ช่าง';
-    }
-  }
-  if (modalSubtitle) {
-    if (target === 'executive') {
-      modalSubtitle.innerText = 'วาดลายเซ็นหรืออัปโหลดรูปภาพลายเซ็น ผอ. เพื่อใส่ลงในเอกสาร';
-    } else if (target === 'chef') {
-      modalSubtitle.innerText = 'วาดลายเซ็นหรืออัปโหลดรูปภาพลายเซ็นของหัวหน้ากลุ่มงาน เพื่อเสนอ ผอ.';
-    } else {
-      modalSubtitle.innerText = 'วาดลายเซ็นหรืออัปโหลดรูปภาพลายเซ็นเพื่อใส่ลงในเอกสาร';
-    }
-  }
-
-  // เคลียร์พรีวิวรูปถ้ามี
-  const previewWrapper = document.getElementById('sig-preview-wrapper');
-  const previewImg = document.getElementById('sig-preview-img');
-  const fileInput = document.getElementById('sig-file-input');
-  if (previewWrapper) previewWrapper.style.display = 'none';
-  if (previewImg) previewImg.src = '';
-  if (fileInput) fileInput.value = '';
-
-  modal.classList.remove('hidden');
-
-  setTimeout(() => {
-    initSignatureCanvas();
-  }, 100);
-};
-
-window.closeSignatureModal = function() {
-  const modal = document.getElementById('signature-modal');
-  if (modal) modal.classList.add('hidden');
-};
-
-function initSignatureCanvas() {
-  sigCanvas = document.getElementById('signature-canvas');
-  if (!sigCanvas) return;
-  sigCtx = sigCanvas.getContext('2d');
-
-  // ปรับความละเอียด Retina / High DPI
-  const rect = sigCanvas.getBoundingClientRect();
-  const scale = window.devicePixelRatio || 1;
-  sigCanvas.width = (rect.width || 380) * scale;
-  sigCanvas.height = 150 * scale;
-  sigCtx.scale(scale, scale);
-
-  sigCtx.strokeStyle = "#0f172a";
-  sigCtx.lineWidth = 2.5;
-  sigCtx.lineCap = "round";
-  sigCtx.lineJoin = "round";
-
-  // Event Listeners สำหรับเมาส์และทัชสกรีน
-  const getPos = (e) => {
-    const cRect = sigCanvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return {
-      x: clientX - cRect.left,
-      y: clientY - cRect.top
-    };
-  };
-
-  const startDraw = (e) => {
-    e.preventDefault();
-    isDrawingSig = true;
-    const pos = getPos(e);
-    sigCtx.beginPath();
-    sigCtx.moveTo(pos.x, pos.y);
-  };
-
-  const draw = (e) => {
-    if (!isDrawingSig) return;
-    e.preventDefault();
-    const pos = getPos(e);
-    sigCtx.lineTo(pos.x, pos.y);
-    sigCtx.stroke();
-  };
-
-  const stopDraw = (e) => {
-    if (!isDrawingSig) return;
-    isDrawingSig = false;
-  };
-
-  sigCanvas.onmousedown = startDraw;
-  sigCanvas.onmousemove = draw;
-  window.onmouseup = stopDraw;
-
-  sigCanvas.ontouchstart = startDraw;
-  sigCanvas.ontouchmove = draw;
-  sigCanvas.ontouchend = stopDraw;
-
-  window.clearSignature();
-}
-
-window.clearSignature = function() {
-  if (!sigCanvas || !sigCtx) return;
-  const rect = sigCanvas.getBoundingClientRect();
-  sigCtx.clearRect(0, 0, rect.width || 380, 150);
-  currentSigDataUrl = null;
-};
-
-window.switchSigTab = function(mode) {
-  const drawTab = document.getElementById('sig-draw-container');
-  const uploadTab = document.getElementById('sig-upload-container');
-  const drawBtn = document.getElementById('tab-sig-draw');
-  const uploadBtn = document.getElementById('tab-sig-upload');
-
-  if (mode === 'draw') {
-    if (drawTab) drawTab.style.display = 'block';
-    if (uploadTab) uploadTab.style.display = 'none';
-    if (drawBtn) { drawBtn.style.background = 'white'; drawBtn.style.color = '#0284c7'; drawBtn.style.fontWeight = '700'; }
-    if (uploadBtn) { uploadBtn.style.background = 'transparent'; uploadBtn.style.color = '#64748b'; uploadBtn.style.fontWeight = '600'; }
-    setTimeout(initSignatureCanvas, 50);
-  } else {
-    if (drawTab) drawTab.style.display = 'none';
-    if (uploadTab) uploadTab.style.display = 'block';
-    if (uploadBtn) { uploadBtn.style.background = 'white'; uploadBtn.style.color = '#0284c7'; uploadBtn.style.fontWeight = '700'; }
-    if (drawBtn) { drawBtn.style.background = 'transparent'; drawBtn.style.color = '#64748b'; drawBtn.style.fontWeight = '600'; }
-  }
-};
-
-window.handleSigFileUpload = function(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    currentSigDataUrl = e.target.result;
-    const previewWrapper = document.getElementById('sig-preview-wrapper');
-    const previewImg = document.getElementById('sig-preview-img');
-    if (previewImg && previewWrapper) {
-      previewImg.src = currentSigDataUrl;
-      previewWrapper.style.display = 'block';
-    }
-  };
-  reader.readAsDataURL(file);
-};
-
-window.saveSignature = async function() {
-  const uploadTab = document.getElementById('sig-upload-container');
-  const isUploadMode = uploadTab && uploadTab.style.display !== 'none';
-
-  let finalSigUrl = null;
-  if (isUploadMode) {
-    finalSigUrl = currentSigDataUrl;
-  } else if (sigCanvas) {
-    finalSigUrl = sigCanvas.toDataURL("image/png");
-  }
-
-  if (!finalSigUrl) {
-    alert("กรุณาวาดลายเซ็นหรืออัปโหลดรูปภาพก่อนบันทึก");
-    return;
-  }
-
-  const now = new Date();
-  const fullThaiDateStr = formatThaiFullDate(now);
-
-  if (sigTargetRole === 'executive') {
-    // บันทึกลายเซ็นผู้อำนวยการ
-    const defaultApprover = getCleanName(document.getElementById('report-approver-name')?.value.trim() || (currentUserRole === 'executive' ? currentOfficer : "นางสาวศิริพรรณ ชมพูภู่"));
-    
-    // ดึง decision ที่เคยเลือกไว้ หรือตั้งเป็น acknowledge
-    let prevDecision = 'acknowledge';
-    try {
-      const rawDec = localStorage.getItem('pyh_executive_decision');
-      if (rawDec) {
-        const d = JSON.parse(rawDec);
-        if (d && d.decision) prevDecision = d.decision;
-      }
-    } catch(e) {}
-
-    const certData = {
-      approver: defaultApprover,
-      decision: prevDecision,
-      decisionLabel: (prevDecision === 'acknowledge') ? 'รับทราบ' : 'อนุมัติซ่อมแซม',
-      signatureImg: finalSigUrl,
-      certifiedAt: now.toISOString(),
-      certifiedDateStr: fullThaiDateStr,
-      certifiedTimeStr: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-    };
-
-    localStorage.setItem('pyh_exec_certification', JSON.stringify(certData));
-    localStorage.setItem('pyh_executive_decision', JSON.stringify({
-      decision: prevDecision,
-      savedAt: now.toISOString()
-    }));
-
-    if (isFirebaseReady() && db) {
-      try {
-        await setDoc(doc(db, "system_state", "report_certifications"), {
-          exec_cert: certData,
-          exec_decision: { decision: prevDecision, savedAt: now.toISOString() },
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-      } catch (e) {
-        console.warn("Firestore sync exec_cert error:", e);
-      }
-    }
-
-    closeSignatureModal();
-    renderExecutiveCertificationUI();
-    alert("✍️ บันทึกลายมือชื่อของผู้อำนวยการลงในเอกสารเรียบร้อยแล้ว!");
-  } else if (sigTargetRole === 'chef') {
-    // บันทึกลายเซ็นหัวหน้ากลุ่มงานบริหารทั่วไป (นายคมสัน ศรีสิงห์)
-    const defaultChef = getCleanName(document.getElementById('report-reviewer-name')?.value.trim() || "นายคมสัน ศรีสิงห์");
-    const certData = {
-      officer: defaultChef,
-      role: 'chef_inspector',
-      signatureImg: finalSigUrl,
-      certifiedAt: now.toISOString(),
-      certifiedDateStr: fullThaiDateStr,
-      certifiedTimeStr: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-    };
-
-    localStorage.setItem('pyh_chef_certification', JSON.stringify(certData));
-
-    if (isFirebaseReady() && db) {
-      try {
-        await setDoc(doc(db, "system_state", "report_certifications"), {
-          chef_cert: certData,
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-      } catch (e) {
-        console.warn("Firestore sync chef_cert error:", e);
-      }
-    }
-
-    closeSignatureModal();
-    renderChefCertificationUI();
-    alert("✍️ บันทึกลายมือชื่อของหัวหน้ากลุ่มงานบริหารทั่วไปลงในเอกสารเรียบร้อยแล้ว!");
-  } else {
-    // บันทึกลายเซ็นของช่างผู้ตรวจลง localStorage
-    const cleanName = getCleanName(currentOfficer) || "นายสุวิทย์ พวงสมบัติ";
-    const certData = {
-      officer: cleanName,
-      role: 'inspector',
-      signatureImg: finalSigUrl,
-      certifiedAt: now.toISOString(),
-      certifiedDateStr: fullThaiDateStr,
-      certifiedTimeStr: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-    };
-
-    localStorage.setItem('pyh_tech_certification', JSON.stringify(certData));
-
-    if (isFirebaseReady() && db) {
-      try {
-        await setDoc(doc(db, "system_state", "report_certifications"), {
-          tech_cert: certData,
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-      } catch (e) {
-        console.warn("Firestore sync tech_cert error:", e);
-      }
-    }
-
-    closeSignatureModal();
-    renderTechCertificationUI();
-    alert("✍️ บันทึกลายมือชื่อของเจ้าหน้าที่ช่างลงในเอกสารเรียบร้อยแล้ว!");
-  }
-};
-
-// แปลงเลขอารบิกเป็นเลขไทยสำหรับหนังสือราชการ
-function toThaiNumerals(num) {
-  if (num === null || num === undefined) return '';
-  const thaiDigits = ['๐', '๑', '๒', '๓', '๔', '๕', '๖', '๗', '๘', '๙'];
-  return String(num).replace(/[0-9]/g, d => thaiDigits[d]);
-}
-
-window.setReportFormat = function (mode) {
-  currentReportFormat = mode;
-  const btnMemo = document.getElementById('btn-mode-memo');
-  const btnDetailed = document.getElementById('btn-mode-detailed');
-  const editToolbar = document.getElementById('memo-edit-toolbar');
-
-  if (btnMemo && btnDetailed) {
-    if (mode === 'memo') {
-      btnMemo.style.background = '#ffffff';
-      btnMemo.style.color = '#004d40';
-      btnMemo.style.fontWeight = '700';
-
-      btnDetailed.style.background = 'transparent';
-      btnDetailed.style.color = '#ffffff';
-      btnDetailed.style.fontWeight = '600';
-
-      if (editToolbar) editToolbar.style.display = 'flex';
-      const btnToggle = document.getElementById('btn-toggle-memo-toolbar');
-      if (btnToggle) btnToggle.style.display = 'inline-flex';
-    } else {
-      btnDetailed.style.background = '#ffffff';
-      btnDetailed.style.color = '#004d40';
-      btnDetailed.style.fontWeight = '700';
-
-      btnMemo.style.background = 'transparent';
-      btnMemo.style.color = '#ffffff';
-      btnMemo.style.fontWeight = '600';
-
-      if (editToolbar) editToolbar.style.display = 'none';
-      const btnToggle = document.getElementById('btn-toggle-memo-toolbar');
-      if (btnToggle) btnToggle.style.display = 'none';
-    }
-  }
-
-  window.renderSelectedReport();
-};
-
-window.toggleMemoEditToolbar = function () {
-  const editToolbar = document.getElementById('memo-edit-toolbar');
-  if (!editToolbar) return;
-  const isHidden = (window.getComputedStyle(editToolbar).display === 'none');
-  editToolbar.style.display = isHidden ? 'flex' : 'none';
-};
-
-// ฟังก์ชันปรับขนาดตัวอักษรเฉพาะส่วนที่เลือก หรือ ทั้งเอกสาร
-window.adjustTargetMemoFont = function (delta) {
-  const target = document.getElementById('memo-font-target')?.value || 'all';
-
-  if (target === 'all') {
-    memoFontConfig.header = Math.max(12, Math.min(22, memoFontConfig.header + delta));
-    memoFontConfig.body = Math.max(12, Math.min(22, memoFontConfig.body + delta));
-    memoFontConfig.sign = Math.max(11, Math.min(20, memoFontConfig.sign + delta));
-  } else if (target === 'title') {
-    memoFontConfig.title = Math.max(18, Math.min(48, (memoFontConfig.title || 29) + delta));
-  } else if (target === 'header') {
-    memoFontConfig.header = Math.max(12, Math.min(22, memoFontConfig.header + delta));
-  } else if (target === 'body') {
-    memoFontConfig.body = Math.max(12, Math.min(22, memoFontConfig.body + delta));
-  } else if (target === 'sign') {
-    memoFontConfig.sign = Math.max(11, Math.min(20, memoFontConfig.sign + delta));
-  }
-
-  window.updateMemoFontDisplay();
-  window.applyMemoStyles();
-};
-
-window.updateMemoFontDisplay = function () {
-  const target = document.getElementById('memo-font-target')?.value || 'all';
-  const input = document.getElementById('memo-font-size-input');
-  const disp = document.getElementById('memo-font-size-display');
-  const currentVal = (target === 'all') ? memoFontConfig.body : (memoFontConfig[target] || 16);
-  if (input) input.value = currentVal;
-  if (disp) disp.innerText = `${currentVal}pt`;
-};
-
-window.applyMemoStyles = function () {
-  const memoPaper = document.querySelector('.memo-paper');
-  if (!memoPaper) return;
-
-  // ระยะขอบ 4 ทิศทาง (มาตรฐาน: บน 2cm, ล่าง 2cm, ซ้าย 2.5cm, ขวา 2cm)
-  memoPaper.style.paddingTop = `${memoMargins.top}cm`;
-  memoPaper.style.paddingBottom = `${memoMargins.bottom}cm`;
-  memoPaper.style.paddingLeft = `${memoMargins.left}cm`;
-  memoPaper.style.paddingRight = `${memoMargins.right}cm`;
-
-  // อัปเดตช่องตัวเลขขอบ 4 ด้านในแถบเครื่องมือ
-  const inTop = document.getElementById('margin-in-top');
-  const inBottom = document.getElementById('margin-in-bottom');
-  const inLeft = document.getElementById('margin-in-left');
-  const inRight = document.getElementById('margin-in-right');
-  if (inTop) inTop.value = memoMargins.top;
-  if (inBottom) inBottom.value = memoMargins.bottom;
-  if (inLeft) inLeft.value = memoMargins.left;
-  if (inRight) inRight.value = memoMargins.right;
-
-  // ระยะบรรทัด
-  memoPaper.style.lineHeight = memoLineSpacing;
-
-  // ปรับขนาดฟอนต์หัวกระดาษ "บันทึกข้อความ"
-  memoPaper.querySelectorAll('.memo-title-banner h1').forEach(el => {
-    el.style.fontSize = `${memoFontConfig.title || 29}pt`;
-  });
-
-  // ปรับขนาดฟอนต์หัวหนังสือ
-  memoPaper.querySelectorAll('.memo-info-table td, .memo-info-table td *').forEach(el => {
-    el.style.fontSize = `${memoFontConfig.header}pt`;
-  });
-
-  // ปรับขนาดฟอนต์เนื้อหา
-  memoPaper.querySelectorAll('.memo-section-heading, .memo-para').forEach(el => {
-    el.style.fontSize = `${memoFontConfig.body}pt`;
-  });
-
-  // ปรับขนาดฟอนต์ส่วนลงนาม & กล่องเสนอ/อนุมัติ
-  memoPaper.querySelectorAll('.memo-sign-table, .memo-sign-table td, .memo-sign-table td *, #memo-chef-box-card, #memo-chef-box-card *, #memo-exec-box-card, #memo-exec-box-card *').forEach(el => {
-    if (!el.classList.contains('no-print') && !el.closest('.no-print')) {
-      el.style.fontSize = `${memoFontConfig.sign}pt`;
-    }
-  });
-
-  // บันทึกการตั้งค่าลง localStorage
-  try {
-    localStorage.setItem('pyh_memo_margins', JSON.stringify(memoMargins));
-    localStorage.setItem('pyh_memo_fonts', JSON.stringify(memoFontConfig));
-  } catch(e) {}
-};
-
-// ฟังก์ชันปรับระยะกั้นหน้า-กั้นหลัง (Margin ซ้าย-ขวา แบบปุ่มกด)
-window.adjustMemoMargin = function (deltaMm) {
-  const newLeft = parseFloat((memoMargins.left + (deltaMm / 10)).toFixed(1));
-  const newRight = parseFloat((memoMargins.right + (deltaMm / 10)).toFixed(1));
-  if (newLeft < 1.0 || newLeft > 4.5) return;
-  memoMargins.left = newLeft;
-  memoMargins.right = Math.max(1.0, newRight);
-  window.applyMemoStyles();
-};
-
-window.adjustMemoSpacing = function (delta) {
-  memoLineSpacing = Math.max(1.15, Math.min(1.85, parseFloat((memoLineSpacing + delta).toFixed(2))));
-  window.applyMemoStyles();
-};
-
-window.resetMemoContent = function () {
-  if (confirm("ต้องการคืนค่าข้อความและการจัดหน้าเริ่มต้นใช่ไหม?")) {
-    localStorage.removeItem('pyh_custom_memo_data');
-    localStorage.removeItem('pyh_memo_exec_box_offset');
-    localStorage.removeItem('pyh_memo_chef_box_offset');
-    localStorage.removeItem('pyh_memo_margins');
-    localStorage.removeItem('pyh_memo_fonts');
-    memoFontConfig = { title: 29, header: 16, body: 16, sign: 15 };
-    memoMargins = { top: 2.0, bottom: 2.0, left: 2.5, right: 2.0 };
-    memoLineSpacing = 1.45;
-    memoExecBoxOffset = { x: 0, y: 0 };
-    memoChefBoxOffset = { x: 0, y: 0 };
-    memoExecBoxPosition = 'left';
-    window.updateMemoFontDisplay();
-    renderOfficialMemo();
-  }
-};
-
-// บันทึกข้อความที่ผู้ใช้พิมพ์แก้ไขลงใน localStorage อัตโนมัติ
-window.saveMemoEdits = function () {
-  const paper = document.querySelector('.memo-paper');
-  if (!paper) return;
-
-  const data = {
-    dept: document.getElementById('memo-dept')?.innerText || '',
-    tel: document.getElementById('memo-tel')?.innerText || '',
-    docNo: document.getElementById('memo-doc-no')?.innerText || '',
-    docDate: document.getElementById('memo-doc-date')?.innerText || '',
-    subject: document.getElementById('memo-subject')?.innerText || '',
-    to: document.getElementById('memo-to')?.innerText || '',
-    bgText: document.getElementById('memo-para-bg')?.innerText || '',
-    considerText: document.getElementById('memo-para-consider')?.innerText || '',
-    proposeText: document.getElementById('memo-para-propose')?.innerText || '',
-    savedAt: new Date().toISOString()
-  };
-
-  try {
-    localStorage.setItem('pyh_custom_memo_data', JSON.stringify(data));
-  } catch (e) { }
-};
-
-window.renderSelectedReport = function () {
-  if (currentReportFormat === 'memo') {
-    window.renderOfficialMemo();
-  } else {
-    window.generateExecutiveReport();
-  }
-};
-
-// เรนเดอร์เอกสาร "แบบบันทึกข้อความราชการ" (Official Memo)
-window.renderOfficialMemo = function () {
-  const container = document.getElementById('report-content-body');
-  if (!container) return;
-
-  // คำนวณยอดสถิติจริงของอุปกรณ์ในระบบ
-  const totalAssets = assetsList.length;
-  const checkedAssets = assetsList.filter(a => a.lastChecked);
-  const checkedCount = checkedAssets.length;
-  const readyCount = assetsList.filter(a => a.status === 'READY' && a.lastChecked).length;
-  const issueAssets = assetsList.filter(a => a.status === 'ISSUE');
-  const issueCount = issueAssets.length;
-
-  const feTotal = assetsList.filter(a => a.assetId.startsWith('PYH-FE') || a.type.includes('ถังดับเพลิง')).length;
-  const emTotal = assetsList.filter(a => a.assetId.startsWith('PYH-EM') || a.type.includes('ไฟฉุกเฉิน')).length;
-
-  // ผู้จัดทำและผู้บริหาร
-  // ผู้จัดทำ, ผู้ตรวจสอบ (หัวหน้ากลุ่มงาน), และผู้บริหาร
-  const authorName = getCleanName(currentOfficer) || "นายสุวิทย์ พวงสมบัติ";
-  const authorPos = "นายช่างเทคนิค";
-  const chefReviewerName = getCleanName(document.getElementById('report-reviewer-name')?.value.trim() || "นายคมสัน ศรีสิงห์");
-  const chefReviewerPos1 = "นักเทคนิคการแพทย์ปฏิบัติการ รักษาการในตำแหน่ง";
-  const chefReviewerPos2 = "หัวหน้ากลุ่มงานบริหารทั่วไป";
-  const approverName = "นางสาวศิริพรรณ ชมพูภู่";
-  const approverPos = "ผู้อำนวยการโรงพยาบาลพยุหะคีรี";
-
-  // วันที่ปัจจุบันแบบไทย
-  const now = new Date();
-  const thaiDay = toThaiNumerals(now.getDate());
-  const thaiMonth = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'][now.getMonth()];
-  const thaiYear = toThaiNumerals(now.getFullYear() + 543);
-  const thaiDateFormatted = `${thaiDay}   ${thaiMonth}  ${thaiYear}`;
-
-  // ดึงข้อมูลที่เคยแก้ไขไว้ (ถ้ามี)
-  let saved = null;
-  try {
-    const raw = localStorage.getItem('pyh_custom_memo_data');
-    if (raw) saved = JSON.parse(raw);
-  } catch (e) { }
-
-  // ดึงการตั้งค่าขอบและฟอนต์ที่เคยบันทึกไว้ (ถ้ามี)
-  try {
-    const rawMarg = localStorage.getItem('pyh_memo_margins');
-    if (rawMarg) memoMargins = Object.assign(memoMargins, JSON.parse(rawMarg));
-    const rawFonts = localStorage.getItem('pyh_memo_fonts');
-    if (rawFonts) memoFontConfig = Object.assign(memoFontConfig, JSON.parse(rawFonts));
-  } catch(e) {}
-
-  const deptVal = saved?.dept || "กลุ่มงานบริหารทั่วไปและงานซ่อมบำรุง โรงพยาบาลพยุหะคีรี อำเภอพยุหะคีรี จังหวัดนครสวรรค์";
-  const docNoVal = saved?.docNo || `นว ๐๐๓๓.๓/พิเศษ`;
-  const docDateVal = saved?.docDate || thaiDateFormatted;
-  const subjectVal = saved?.subject || `รายงานผลการตรวจสอบความพร้อมอุปกรณ์ความปลอดภัยอัคคีภัยและโคมไฟฉุกเฉิน ประจำงวดปีงบประมาณ ${thaiYear}`;
-  const toVal = saved?.to || "ผู้อำนวยการโรงพยาบาลพยุหะคีรี";
-
-  const defaultBgText = `ด้วย งานอาคารสถานที่และซ่อมบำรุง กลุ่มงานบริหารทั่วไป โรงพยาบาลพยุหะคีรี มีภารกิจในการดูแล บำรุงรักษา และกำกับความพร้อมใช้งานของระบบความปลอดภัยด้านกายภาพและสิ่งแวดล้อม ตามเกณฑ์ MOIT ๒ ข้อ ๒ (๒.๒) และมาตรฐาน HA ตอนที่ II (ENV 1-4) เพื่อประโยชน์และความปลอดภัยสูงสุดต่อผู้ป่วย ญาติ และบุคลากรผู้ปฏิบัติงาน ให้เป็นไปตามพระราชบัญญัติควบคุมอาคาร และมาตรฐานความปลอดภัยด้านอัคคีภัยในสถานพยาบาลอย่างเคร่งครัด`;
-
-  let defectSummaryThai = "";
-  if (issueCount > 0) {
-    const issueIds = issueAssets.map(a => a.assetId).join(', ');
-    defectSummaryThai = ` ทั้งนี้ ตรวจพบอุปกรณ์ที่มีข้อบกพร่อง/ชำรุดจำนวน ${toThaiNumerals(issueCount)} จุด ได้แก่ ${issueIds} ซึ่งได้ดำเนินการจัดเตรียมถังสำรองเปลี่ยนทดแทน และประสานงานส่งซ่อมแซม/อัดบรรจุสารเคมีใหม่เรียบร้อยแล้ว`;
-  } else {
-    defectSummaryThai = ` โดยไม่พบความชำรุดเสียหาย อุปกรณ์ทั้งหมดอยู่ในเกณฑ์พร้อมใช้งานตามมาตรฐานความปลอดภัยอย่างครบถ้วน`;
-  }
-
-  const defaultConsiderText = `งานอาคารสถานที่และซ่อมบำรุง ขอรายงานผลการตรวจสอบความพร้อมใช้งานของถังดับเพลิงมือถือและโคมไฟส่องสว่างฉุกเฉินทั่วทั้งโรงพยาบาลพยุหะคีรี ครอบคลุมทั้งสิ้น ๖ อาคาร รวม ${toThaiNumerals(totalAssets)} จุดตรวจ (ถังดับเพลิง ${toThaiNumerals(feTotal)} จุด และโคมไฟฉุกเฉิน ${toThaiNumerals(emTotal)} จุด) ได้ดำเนินการตรวจเช็กสภาพความสมบูรณ์ แรงดันเกจ์ สลักนิรภัย และแบตเตอรี่สำรองแล้วเสร็จจำนวน ${toThaiNumerals(checkedCount)} จุด (${toThaiNumerals(Math.round((checkedCount / (totalAssets || 1)) * 100))}%) พบอุปกรณ์พร้อมใช้งานสมบูรณ์ ${toThaiNumerals(readyCount)} จุด${defectSummaryThai} เพื่อให้ระบบความปลอดภัยของโรงพยาบาลพยุหะคีรีมีมาตรฐานและความพร้อมใช้งานในระดับสูงสุดตลอด ๒๔ ชั่วโมง`;
-
-  const defaultProposeText = `จึงเรียนมาเพื่อโปรดทราบ และพิจารณาอนุมัติดำเนินการตามมาตรการบำรุงรักษาอุปกรณ์ความปลอดภัยดังกล่าวต่อไป`;
-
-  let bgText = saved?.bgText || defaultBgText;
-  if (bgText && bgText.includes('(Environmental and Safety: HA ENV)')) {
-    bgText = defaultBgText;
-  }
-  const considerText = saved?.considerText || defaultConsiderText;
-  const proposeText = saved?.proposeText || defaultProposeText;
-
-  const memoHtml = `
-    <div class="memo-paper" style="padding-top:${memoMargins.top}cm; padding-bottom:${memoMargins.bottom}cm; padding-left:${memoMargins.left}cm; padding-right:${memoMargins.right}cm; line-height:${memoLineSpacing};" oninput="saveMemoEdits()">
-      
-      <!-- ส่วนหัวตราครุฑและคำว่า บันทึกข้อความ -->
-      <div class="memo-header-top">
-        <img src="garuda.svg" alt="ตราครุฑ" class="memo-garuda-img">
-        <div class="memo-title-banner">
-          <h1 style="font-size:${memoFontConfig.title || 29}pt;">บันทึกข้อความ</h1>
-        </div>
-      </div>
-
-      <!-- ส่วนหัวหนังสือราชการ -->
-      <table class="memo-info-table" style="font-size:${memoFontConfig.header}pt;">
-        <tr>
-          <td colspan="2" style="padding-bottom:5px;">
-            <div style="display:flex; align-items:flex-start;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:85px; flex-shrink:0;">ส่วนราชการ</span>
-              <div style="flex:1; line-height:1.4; font-size:${memoFontConfig.header}pt;">
-                <span id="memo-dept" class="memo-editable" contenteditable="true" style="font-size:${memoFontConfig.header}pt;">${deptVal}</span>
-              </div>
-            </div>
-          </td>
-        </tr>
-        <tr>
-          <td style="width:52%; padding-bottom:5px;">
-            <div style="display:flex; align-items:center;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:30px; flex-shrink:0;">ที่</span>
-              <span id="memo-doc-no" class="memo-editable" contenteditable="true" style="margin-left:8px; min-width:140px; font-size:${memoFontConfig.header}pt;">${docNoVal}</span>
-            </div>
-          </td>
-          <td style="width:48%; padding-bottom:5px;">
-            <div style="display:flex; align-items:center;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:45px; flex-shrink:0;">วันที่</span>
-              <span id="memo-doc-date" class="memo-editable" contenteditable="true" style="margin-left:8px; min-width:140px; font-size:${memoFontConfig.header}pt;">${docDateVal}</span>
-            </div>
-          </td>
-        </tr>
-        <tr>
-          <td colspan="2" style="padding-bottom:5px;">
-            <div style="display:flex; align-items:flex-start;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:45px; flex-shrink:0;">เรื่อง</span>
-              <div style="flex:1; line-height:1.4; font-size:${memoFontConfig.header}pt;">
-                <span id="memo-subject" class="memo-editable" contenteditable="true" style="font-size:${memoFontConfig.header}pt; font-weight:700;">${subjectVal}</span>
-              </div>
-            </div>
-          </td>
-        </tr>
-        <tr>
-          <td colspan="2" style="padding-top:2px; padding-bottom:12px;">
-            <div style="display:flex; align-items:center;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:45px; flex-shrink:0;">เรียน</span>
-              <span id="memo-to" class="memo-editable" contenteditable="true" style="margin-left:8px; font-size:${memoFontConfig.header}pt;">${toVal}</span>
-            </div>
-          </td>
-        </tr>
-      </table>
-
-      <!-- ย่อหน้าที่ 1: ความเป็นมา -->
-      <div class="memo-section-heading" style="font-size:${memoFontConfig.body}pt;">ความเป็นมา</div>
-      <div id="memo-para-bg" class="memo-para memo-editable-block" contenteditable="true" style="font-size:${memoFontConfig.body}pt;">
-        ${bgText}
-      </div>
-
-      <!-- ย่อหน้าที่ 2: ข้อพิจารณา -->
-      <div class="memo-section-heading" style="font-size:${memoFontConfig.body}pt;">ข้อพิจารณา</div>
-      <div id="memo-para-consider" class="memo-para memo-editable-block" contenteditable="true" style="font-size:${memoFontConfig.body}pt;">
-        ${considerText}
-      </div>
-
-      <!-- ย่อหน้าที่ 3: ข้อเสนอ / ข้อสั่งการ -->
-      <div id="memo-para-propose" class="memo-para memo-editable-block" contenteditable="true" style="font-size:${memoFontConfig.body}pt; margin-top:14px; margin-bottom:20px;">
-        ${proposeText}
-      </div>
-
-      <!-- ส่วนลงนามผู้รายงาน, กล่องเสนอ ผอ. (หน.กลุ่มงาน), และคำสั่งการผู้อำนวยการ -->
-      ${(() => {
-        // ดึง offset ที่บันทึกไว้สำหรับกล่อง ผอ.
-        try {
-          const rawOff = localStorage.getItem('pyh_memo_exec_box_offset');
-          if (rawOff) memoExecBoxOffset = JSON.parse(rawOff);
-        } catch(e) {}
-
-        // ดึง offset ที่บันทึกไว้สำหรับกล่อง หน.กลุ่มงาน
-        try {
-          const rawChefOff = localStorage.getItem('pyh_memo_chef_box_offset');
-          if (rawChefOff) memoChefBoxOffset = JSON.parse(rawChefOff);
-        } catch(e) {}
-
-        const transformStyle = (memoExecBoxOffset.x || memoExecBoxOffset.y) 
-          ? `transform: translate(${memoExecBoxOffset.x}px, ${memoExecBoxOffset.y}px);` 
-          : '';
-
-        const chefTransformStyle = (memoChefBoxOffset.x || memoChefBoxOffset.y)
-          ? `transform: translate(${memoChefBoxOffset.x}px, ${memoChefBoxOffset.y}px);`
-          : '';
-
-        // กล่องคำสั่งการ / การอนุมัติของ ผอ. (รองรับการใช้เมาส์ลากย้ายตำแหน่งได้อิสระ)
-        const execBoxHtml = `
-          <div id="memo-exec-box-card" style="margin-top:${memoExecBoxMarginTop}px; padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; background:#fafafa; text-align:left; cursor:grab; position:relative; ${transformStyle}">
-            <div id="memo-exec-box-drag-handle" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; user-select:none;">
-              <span style="font-weight:700; font-size:${memoFontConfig.sign}pt; color:#0f172a;">คำสั่งการ / การอนุมัติ</span>
-              <span class="no-print" style="font-size:11px; color:#94a3b8; display:flex; align-items:center; gap:3px; background:#f1f5f9; padding:2px 6px; border-radius:4px;" title="คลิกค้างแล้วลากเมาส์เพื่อย้ายตำแหน่งกล่อง ผอ. ได้อย่างอิสระ">
-                ✥ ลากย้ายได้
-              </span>
-            </div>
-            
-            <!-- ตัวเลือกคำสั่งการแบบช่องเช็ก [ ✓ ] รับทราบ [   ] อนุมัติซ่อมแซม (คลิกสลับได้โดยตรง) -->
-            <div style="margin-bottom:10px; font-size:${memoFontConfig.sign}pt; display:flex; flex-wrap:wrap; gap:16px; align-items:center;">
-              <span id="print-appr-ack" onclick="setExecutiveApproval('acknowledge')" style="cursor:pointer; user-select:none; font-family:'TH Sarabun New', 'Sarabun', sans-serif;">[ &nbsp; ] รับทราบ</span>
-              <span id="print-appr-repair" onclick="setExecutiveApproval('repair')" style="cursor:pointer; user-select:none; font-family:'TH Sarabun New', 'Sarabun', sans-serif;">[ ✓ ] อนุมัติซ่อมแซม</span>
-            </div>
-
-            <!-- ช่องลงนาม ผอ. (ไม่มีบรรทัดวันที่) -->
-            <div style="text-align:center; margin-top:10px;">
-              <div id="exec-cert-container" style="min-height:28px;">
-                <!-- เติมโดย renderExecutiveCertificationUI() -->
-              </div>
-              <div style="border-bottom:1px dotted #94a3b8; width:80%; margin:4px auto 4px auto;"></div>
-              <div style="font-weight:700; font-size:${memoFontConfig.sign}pt;" id="report-display-exec-name">( ${approverName} )</div>
-              <div style="font-size:${memoFontConfig.sign - 2}pt; color:#475569;">${approverPos}</div>
-            </div>
-          </div>
-        `;
-
-        // ส่วนลงนามผู้จัดทำ / ผู้รายงาน (ช่างเทคนิค - ไม่มีบรรทัดวันที่)
-        const techSignHtml = `
-          <div style="margin-top:6px; text-align:center;">
-            <!-- ลายเซ็นดิจิทัลของช่าง/ผู้รายงาน -->
-            <div id="tech-cert-container" style="min-height:36px;">
-              <!-- เติมโดย renderTechCertificationUI() -->
-            </div>
-
-            <div style="border-bottom:1px dotted #94a3b8; width:75%; margin:4px auto 6px auto;"></div>
-            <div style="font-weight:700; font-size:${memoFontConfig.sign}pt;" id="report-display-tech-name">( ${authorName} )</div>
-            <div style="font-size:${memoFontConfig.sign - 1}pt; color:#334155;" id="report-display-tech-pos">${authorPos}</div>
-          </div>
-        `;
-
-        // กล่องข้อความหัวหน้ากลุ่มงานบริหารทั่วไป (เสนอ ผอ.)
-        const chefBoxHtml = `
-          <div id="memo-chef-box-card" style="margin-top:${memoExecBoxMarginTop}px; padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; background:#fafafa; text-align:left; cursor:grab; position:relative; ${chefTransformStyle}">
-            <div id="memo-chef-box-drag-handle" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; user-select:none;">
-              <span style="font-weight:700; font-size:${memoFontConfig.sign}pt; color:#0f172a;">เรียน ผู้อำนวยการโรงพยาบาลพยุหะคีรี</span>
-              <span class="no-print" style="font-size:11px; color:#94a3b8; display:flex; align-items:center; gap:3px; background:#f1f5f9; padding:2px 6px; border-radius:4px;" title="คลิกค้างแล้วลากเมาส์เพื่อย้ายตำแหน่งกล่องนี้ได้อย่างอิสระ">
-                ✥ ลากย้ายได้
-              </span>
-            </div>
-
-            <!-- ข้อความเพื่อรับทราบ / พิจารณาอนุมัติ (คลิกสลับได้) -->
-            <div style="margin-bottom:10px; font-size:${memoFontConfig.sign}pt; display:flex; flex-wrap:wrap; gap:14px; align-items:center;">
-              <span style="font-weight:600;">เพื่อ</span>
-              <span id="memo-chef-opt-ack" onclick="setChefApproval('ack')" style="cursor:pointer; user-select:none; font-family:'TH Sarabun New', 'Sarabun', sans-serif;">[ ✓ ] โปรดรับทราบ</span>
-              <span id="memo-chef-opt-approve" onclick="setChefApproval('approve')" style="cursor:pointer; user-select:none; font-family:'TH Sarabun New', 'Sarabun', sans-serif;">[ &nbsp; ] โปรดพิจารณาอนุมัติ</span>
-            </div>
-
-            <!-- ช่องลายเซ็นหัวหน้ากลุ่มงาน -->
-            <div style="text-align:center; margin-top:8px;">
-              <div id="memo-chef-cert-container" style="min-height:28px;">
-                <!-- เติมโดย renderChefCertificationUI() -->
-              </div>
-              <div style="border-bottom:1px dotted #94a3b8; width:80%; margin:4px auto 4px auto;"></div>
-              <div style="font-weight:700; font-size:${memoFontConfig.sign}pt;" id="memo-display-chef-name">( ${chefReviewerName} )</div>
-              <div style="font-size:${memoFontConfig.sign - 2}pt; color:#475569;">${chefReviewerPos1}</div>
-              <div style="font-size:${memoFontConfig.sign - 2}pt; color:#475569;">${chefReviewerPos2}</div>
-            </div>
-          </div>
-        `;
-
-        if (memoExecBoxPosition === 'right') {
-          // ถ้าเลือกตำแหน่ง 'ขวา': วางช่างทางขวา, กล่อง หน.กลุ่มงาน ถัดลงมา, แล้วตามด้วยกล่อง ผอ.
-          return `
-            <table class="memo-sign-table" style="width:100%; font-size:${memoFontConfig.sign}pt; border-collapse:collapse;">
-              <tr>
-                <td style="width:40%;"></td>
-                <td style="width:60%; vertical-align:top; text-align:center;">
-                  ${techSignHtml}
-                </td>
-              </tr>
-              <tr>
-                <td style="width:40%;"></td>
-                <td style="width:60%; vertical-align:top;">
-                  ${chefBoxHtml}
-                </td>
-              </tr>
-              <tr>
-                <td style="width:40%;"></td>
-                <td style="width:60%; vertical-align:top;">
-                  ${execBoxHtml}
-                </td>
-              </tr>
-            </table>
-          `;
-        } else {
-          // ตำแหน่ง 'ซ้าย' (มาตรฐาน 2 คอลัมน์):
-          // ฝั่งซ้าย: กล่อง ผอ. (คำสั่งการ / การอนุมัติ)
-          // ฝั่งขวา: ลายเซ็นช่างผู้รายงาน + กล่อง หน.กลุ่มงาน (เรียน ผอ. เพื่อโปรดรับทราบ/อนุมัติ)
-          return `
-            <table class="memo-sign-table" style="width:100%; font-size:${memoFontConfig.sign}pt; border-collapse:collapse;">
-              <tr>
-                <td style="width:48%; vertical-align:top; padding-right:12px;">
-                  ${execBoxHtml}
-                </td>
-                <td style="width:52%; vertical-align:top; padding-left:8px;">
-                  ${techSignHtml}
-                  <div style="margin-top:14px;">
-                    ${chefBoxHtml}
-                  </div>
-                </td>
-              </tr>
-            </table>
-          `;
-        }
-      })()}
-    </div>
-  `;
-
-  container.innerHTML = memoHtml;
-
-  // เปิดใช้งานฟังก์ชันลากย้ายกล่อง ผอ. และกล่อง หน.กลุ่มงาน ด้วยเมาส์
-  if (typeof window.initExecBoxDraggable === 'function') {
-    window.initExecBoxDraggable();
-  }
-  if (typeof window.initChefBoxDraggable === 'function') {
-    window.initChefBoxDraggable();
-  }
-
-  // ซิงก์ลายเซ็นและคำสั่งการที่มีอยู่ในระบบ
-  if (typeof window.renderTechCertificationUI === 'function') {
-    window.renderTechCertificationUI();
-  }
-  if (typeof window.renderChefCertificationUI === 'function') {
-    window.renderChefCertificationUI();
-  }
-  if (typeof window.renderExecutiveCertificationUI === 'function') {
-    window.renderExecutiveCertificationUI();
-  }
-  if (typeof window.restoreExecutiveApproval === 'function') {
-    window.restoreExecutiveApproval();
-  }
-
-  // อัปเดตการแสดงผลขนาดฟอนต์และขอบกระดาษให้ตรงกับค่าปัจจุบัน
-  if (typeof window.applyMemoStyles === 'function') {
-    window.applyMemoStyles();
-  }
-  if (typeof window.updateMemoFontDisplay === 'function') {
-    window.updateMemoFontDisplay();
-  }
-};
-
-window.generateExecutiveReport = function () {
-  const container = document.getElementById('report-content-body');
-  if (!container) return;
-
-  const period = document.getElementById('report-period')?.value || "กันยายน 2569";
-  const buildingFilter = document.getElementById('report-building-filter')?.value || "all";
-
-  // ส่วนที่ 1: ผู้จัดทำและเสนอรายงาน
-  const authorName = getCleanName(document.getElementById('report-author-name')?.value.trim() || "นายสุวิทย์ พวงสมบัติ");
-  const authorPos = document.getElementById('report-author-pos')?.value.trim() || "นายช่างเทคนิค";
-  const author = authorName;
-
-  // ส่วนที่ 2: ผู้ตรวจสอบ (Chef Inspector)
-  const reviewerName = getCleanName(document.getElementById('report-reviewer-name')?.value.trim() || "นายคมสันต์ ศรีสิงห์");
-  const reviewerPos = document.getElementById('report-reviewer-pos')?.value.trim() || "นักเทคนิคการแพทย์ปฏิบัติการ รักษาราชการแทน หัวหน้าฝ่ายบริหารทั่วไป";
-  const reviewer = reviewerName;
-
-  // ส่วนที่ 3: ผู้บริหารผู้อนุมัติคำสั่งการ
-  const approverName = getCleanName(document.getElementById('report-approver-name')?.value.trim() || "นางสาวศิริพรรณ ชมพูภู่");
-  const approverPos = document.getElementById('report-approver-pos')?.value.trim() || "ผู้อำนวยการโรงพยาบาลพยุหะคีรี";
-  const approver = approverName;
-
-  const includeAllItems = document.getElementById('report-include-all-items')?.checked ?? true;
-
-  // เรียงลำดับอุปกรณ์ตาม: 1. ตึก/อาคาร 2. ชั้น/ห้อง/จุดติดตั้ง 3. รหัสลำดับอุปกรณ์ (Natural sorting)
-  const buildingOrder = [
-    'building_er_lower',
-    'building_er_upper',
-    'building_hpc',
-    'building_ipd',
-    'building_nisit',
-    'building_opd_dm'
-  ];
-
-  const rawTargetAssets = (buildingFilter === 'all')
-    ? [...assetsList]
-    : assetsList.filter(a => a.buildingId === buildingFilter);
-
-  const targetAssets = rawTargetAssets.sort((a, b) => {
-    // 1. เรียงตามลำดับตึก/อาคาร
-    const bIdxA = buildingOrder.indexOf(a.buildingId);
-    const bIdxB = buildingOrder.indexOf(b.buildingId);
-    const orderA = bIdxA !== -1 ? bIdxA : 999;
-    const orderB = bIdxB !== -1 ? bIdxB : 999;
-    if (orderA !== orderB) return orderA - orderB;
-
-    // 2. เรียงตามชั้น (ถ้ามี)
-    const floorA = a.floor || 1;
-    const floorB = b.floor || 1;
-    if (floorA !== floorB) return floorA - floorB;
-
-    // 3. เรียงตามรหัสอุปกรณ์ (Asset ID) ลำดับ 01, 02, 03... (Natural Numeric Sorting)
-    const idComp = (a.assetId || '').localeCompare(b.assetId || '', undefined, { numeric: true, sensitivity: 'base' });
-    if (idComp !== 0) return idComp;
-
-    // 4. เรียงตามห้อง / จุดติดตั้ง
-    return (a.location || '').localeCompare(b.location || '', 'th');
-  });
-
-  const totalAssets = targetAssets.length;
-  const checkedAssets = targetAssets.filter(a => a.lastChecked);
-  const checkedCount = checkedAssets.length;
-  const readyCount = targetAssets.filter(a => a.status === 'READY' && a.lastChecked).length;
-  const issueAssets = targetAssets.filter(a => a.status === 'ISSUE');
-  const issueCount = issueAssets.length;
-  const uninspectedCount = totalAssets - checkedCount;
-
-  const coverageRate = totalAssets > 0 ? Math.round((checkedCount / totalAssets) * 100) : 0;
-  const readinessRate = checkedCount > 0 ? Math.round((readyCount / checkedCount) * 100) : 0;
-
-  // จำแนกตามประเภทอุปกรณ์
-  const feAssets = targetAssets.filter(a => a.assetId.startsWith('PYH-FE') || a.type.includes('ถังดับเพลิง'));
-  const feChecked = feAssets.filter(a => a.lastChecked).length;
-  const feReady = feAssets.filter(a => a.status === 'READY' && a.lastChecked).length;
-  const feIssue = feAssets.filter(a => a.status === 'ISSUE').length;
-
-  const emAssets = targetAssets.filter(a => a.assetId.startsWith('PYH-EM') || a.type.includes('ไฟฉุกเฉิน'));
-  const emChecked = emAssets.filter(a => a.lastChecked).length;
-  const emReady = emAssets.filter(a => a.status === 'READY' && a.lastChecked).length;
-  const emIssue = emAssets.filter(a => a.status === 'ISSUE').length;
-
-  const filterName = (buildingFilter === 'all')
-    ? 'ทุกอาคารทั่วทั้งโรงพยาบาลพยุหะคีรี (6 อาคาร 48 จุดตรวจ)'
-    : (buildingMetadata[buildingFilter]?.name || buildingFilter);
-
-  const reportDate = new Date().toLocaleDateString('th-TH', {
-    year: 'numeric', month: 'long', day: 'numeric'
-  });
-
-  // สร้างแถวตารางวิเคราะห์รายอาคาร
-  let buildingRowsHtml = '';
-  const buildingKeys = (buildingFilter === 'all')
-    ? Object.keys(buildingMetadata)
-    : [buildingFilter];
-
-  buildingKeys.forEach((bId, idx) => {
-    const meta = buildingMetadata[bId] || { name: bId };
-    const bAssets = assetsList.filter(a => a.buildingId === bId);
-    const bTotal = bAssets.length;
-    const bChecked = bAssets.filter(a => a.lastChecked).length;
-    const bReady = bAssets.filter(a => a.status === 'READY' && a.lastChecked).length;
-    const bIssue = bAssets.filter(a => a.status === 'ISSUE').length;
-    const bRate = bChecked > 0 ? Math.round((bReady / bChecked) * 100) : 0;
-
-    let statusBadge = '';
-    if (bIssue > 0) {
-      statusBadge = `<span class="badge badge-issue">พบชำรุด ${bIssue} จุด</span>`;
-    } else if (bChecked === bTotal && bTotal > 0) {
-      statusBadge = `<span class="badge badge-ready">พร้อมใช้งาน 100%</span>`;
-    } else {
-      statusBadge = `<span style="color:#d97706; font-size:12px; font-weight:600;">ตรวจแล้ว ${bChecked}/${bTotal} จุด</span>`;
-    }
-
-    buildingRowsHtml += `
-      <tr>
-        <td style="text-align:center;">${idx + 1}</td>
-        <td><b>${meta.name}</b></td>
-        <td style="text-align:center;">${bTotal}</td>
-        <td style="text-align:center;">${bChecked}</td>
-        <td style="text-align:center; color:#15803d; font-weight:bold;">${bReady}</td>
-        <td style="text-align:center; color:#dc2626; font-weight:bold;">${bIssue}</td>
-        <td style="text-align:center;"><b>${bRate}%</b></td>
-        <td style="text-align:center;">${statusBadge}</td>
-      </tr>
-    `;
-  });
-
-  // สร้างตารางรายการข้อบกพร่อง / แผนซ่อมบำรุง
-  let defectHtml = '';
-  if (issueAssets.length === 0) {
-    defectHtml = `
-      <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:14px; color:#166534; font-size:13px; margin-bottom:16px;">
-        ✅ <b>ผลการประเมินความปลอดภัย:</b> ไม่พบอุปกรณ์ที่มีข้อบกพร่องหรือชำรุดในงวดนี้ อุปกรณ์ทั้งหมดที่ได้รับการตรวจเช็กอยู่ในเกณฑ์พร้อมใช้งาน 100% ตามมาตรฐาน HA ENV
-      </div>
-    `;
-  } else {
-    defectHtml = `
-      <table class="report-table">
-        <thead>
-          <tr style="background:#fee2e2;">
-            <th style="width:40px; text-align:center;">ที่</th>
-            <th style="width:110px;">รหัสอุปกรณ์</th>
-            <th style="width:140px;">ประเภท</th>
-            <th>ตำแหน่งติดตั้ง / อาคาร</th>
-            <th>อาการผิดปกติที่ตรวจพบ</th>
-            <th style="width:120px;">ผู้ตรวจ</th>
-            <th style="width:150px;">มาตรการแก้ไขเร่งด่วน</th>
-            <th style="width:80px; text-align:center;">ระดับความเร่งด่วน</th>
-          </tr>
-        </thead>
-        <tbody>
-    `;
-
-    issueAssets.forEach((item, index) => {
-      const lastLog = inspectionLogs.find(l => l.assetId === item.assetId);
-      const note = lastLog?.notes || "ตรวจพบความผิดปกติระหว่างการตรวจเช็ก";
-
-      let actionPlan = "ส่งซ่อมบำรุง / ตรวจสภาพโดยช่างผู้ชำนาญการ";
-      if (item.assetId.startsWith('PYH-FE')) {
-        if (note.includes('แรงดัน') || note.includes('ขีดเขียว')) {
-          actionPlan = "ส่งอัดบรรจุผงเคมี/ก๊าซใหม่ทันที และตรวจเช็กซีลวาล์ว";
-        } else if (note.includes('สลัก') || note.includes('ซีล')) {
-          actionPlan = "เปลี่ยนสลักนิรภัย (Safety Pin) และซีลล็อคใหม่";
-        } else {
-          actionPlan = "จัดหาถังสำรองเปลี่ยนทดแทน และส่งซ่อมบำรุง";
-        }
-      } else {
-        actionPlan = "เปลี่ยนแบตเตอรี่สำรอง / หลอด LED โคมไฟฉุกเฉิน";
-      }
-
-      defectHtml += `
-        <tr>
-          <td style="text-align:center;">${index + 1}</td>
-          <td><b style="color:#b91c1c;">${item.assetId}</b></td>
-          <td>${cleanAssetType(item.type)}</td>
-          <td><b>${item.building}</b><br><span style="color:#64748b; font-size:11.5px;">${item.location}</span></td>
-          <td style="color:#b91c1c;">${note}</td>
-          <td>${getCleanName(item.lastInspector) || '-'}</td>
-          <td style="color:#00695c; font-weight:600;">${actionPlan}</td>
-          <td style="text-align:center;"><span class="badge badge-issue" style="background:#ef4444; color:white;">เร่งด่วน</span></td>
-        </tr>
-      `;
-    });
-
-    defectHtml += `
-        </tbody>
-      </table>
-    `;
-  }
-
-  // สร้างตารางรายการอุปกรณ์ทั้งหมด (Full Checklist Register)
-  let allItemsRowsHtml = '';
-  targetAssets.forEach((a, i) => {
-    const isReady = a.status === 'READY';
-    let checkedDate = 'ยังไม่ได้ตรวจ';
-    if (a.lastChecked) {
-      const dt = new Date(a.lastChecked);
-      if (!isNaN(dt.getTime())) {
-        checkedDate = dt.toLocaleDateString('th-TH');
-      } else {
-        checkedDate = new Date().toLocaleDateString('th-TH');
-      }
-    }
-    const inspectorName = getCleanName(a.lastInspector) || '-';
-    const cleanedType = cleanAssetType(a.type);
-    allItemsRowsHtml += `
-      <tr>
-        <td style="text-align:center; font-size:11px;">${i + 1}</td>
-        <td><b>${a.assetId}</b></td>
-        <td>${cleanedType}</td>
-        <td>${a.building} - ${a.location}</td>
-        <td style="text-align:center; font-size:11.5px; font-weight:700; color:${isReady ? '#16a34a' : '#dc2626'};">
-          ${isReady ? 'พร้อมใช้งาน' : 'ชำรุด/แจ้งซ่อม'}
-        </td>
-        <td style="text-align:center; font-size:11.5px;">${checkedDate}</td>
-        <td style="font-size:11.5px;">${inspectorName}</td>
-      </tr>
-    `;
-  });
-
-  const fullReportHtml = `
-    <div class="report-paper">
-      
-      <!-- ส่วนหัวเอกสารราชการ -->
-      <div class="report-header-banner">
-        <div>
-          <div style="font-size:12px; font-weight:700; color:#00695c; letter-spacing:0.5px; text-transform:uppercase;">
-            Pyuha Kiri Hospital • Environmental and Safety Committee (HA ENV)
-          </div>
-          <h2 class="report-title">รายงานสรุปผลการตรวจสอบความพร้อมใช้งานระบบความปลอดภัยและอัคคีภัย</h2>
-          <p class="report-subtitle">
-            ถังดับเพลิงมือถือ (Fire Extinguishers) และโคมไฟส่องสว่างฉุกเฉิน (Emergency Lights) • ประจำงวด ${period}
-          </p>
-        </div>
-        <div style="text-align:right;">
-          <span style="display:inline-block; border:1px solid #cbd5e1; padding:4px 8px; border-radius:4px; font-size:11px; background:#f8fafc; font-weight:600;">
-            เลขที่เอกสาร: PYH-ENV-${new Date().getFullYear() + 543}-${String(new Date().getMonth() + 1).padStart(2, '0')}
-          </span>
-          <div style="font-size:11.5px; color:#64748b; margin-top:4px;">
-            วันที่ออกรายงาน: ${reportDate}
-          </div>
-        </div>
-      </div>
-
-      <!-- กล่องข้อมูลการตรวจสอบ (แสดงบนหน้าจอ แต่ซ่อนอัตโนมัติเวลาสั่งพิมพ์เพื่อประหยัดพื้นที่กระดาษ) -->
-      <div class="report-meta-box no-print">
-        <div><b>📅 รอบการตรวจสอบ:</b> ประจำงวด ${period}</div>
-        <div><b>🏢 ขอบเขตการประเมิน:</b> ${filterName}</div>
-        <div><b>👤 ผู้จัดทำรายงาน:</b> ${author}</div>
-        <div><b>🎯 เรียนเสนอ:</b> ${approver}</div>
-        <div style="grid-column: 1 / -1; border-top: 1px dashed #cbd5e1; padding-top: 6px; color:#475569;">
-          <b>📜 อ้างอิงเกณฑ์มาตรฐาน:</b> มาตรฐานโรงพยาบาลและบริการสุขภาพ (HA) ตอนที่ II ระบบกายภาพและความปลอดภัย (ENV 1-4), NFPA 10 (Portable Fire Extinguishers) และมาตรฐาน วสท. 022002-22
-        </div>
-      </div>
-
-      <!-- สรุปดัชนีชี้วัดหลัก (Executive KPIs) -->
-      <div class="report-section-title">1. สรุปดัชนีชี้วัดความพร้อมใช้งานตามมาตรฐาน HA (Executive Safety KPIs)</div>
-      <div class="report-summary-cards">
-        <div class="report-stat">
-          <span class="report-stat-num" style="color:#0f172a;">${totalAssets}</span>
-          <span class="report-stat-label">อุปกรณ์เป้าหมายทั้งหมด (จุด)</span>
-        </div>
-        <div class="report-stat">
-          <span class="report-stat-num" style="color:#0284c7;">${coverageRate}%</span>
-          <span class="report-stat-label">อัตราการตรวจเช็ก (${checkedCount}/${totalAssets})</span>
-        </div>
-        <div class="report-stat">
-          <span class="report-stat-num" style="color:#16a34a;">${readinessRate}%</span>
-          <span class="report-stat-label">อัตราความพร้อมใช้งาน (${readyCount}/${checkedCount || totalAssets})</span>
-        </div>
-        <div class="report-stat" style="background:${issueCount > 0 ? '#fef2f2' : '#f0fdf4'};">
-          <span class="report-stat-num" style="color:${issueCount > 0 ? '#dc2626' : '#16a34a'};">${issueCount}</span>
-          <span class="report-stat-label">รายการชำรุด / ต้องซ่อมบำรุง</span>
-        </div>
-      </div>
-
-      <!-- แยกประเภทอุปกรณ์ -->
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
-        <div style="border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px; background:#f8fafc;">
-          <b style="color:#00695c; font-size:13px;">🧯 ระบบถังดับเพลิง (Fire Extinguishers)</b>
-          <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:12px;">
-            <span>เป้าหมายทั้งหมด: <b>${feAssets.length} จุด</b></span>
-            <span>ตรวจแล้ว: <b>${feChecked}</b></span>
-            <span>พร้อมใช้งาน: <b style="color:#15803d;">${feReady}</b></span>
-            <span>ชำรุด: <b style="color:#dc2626;">${feIssue}</b></span>
-          </div>
-        </div>
-        <div style="border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px; background:#f8fafc;">
-          <b style="color:#0284c7; font-size:13px;">💡 ระบบไฟฉุกเฉิน (Emergency Lights)</b>
-          <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:12px;">
-            <span>เป้าหมายทั้งหมด: <b>${emAssets.length} จุด</b></span>
-            <span>ตรวจแล้ว: <b>${emChecked}</b></span>
-            <span>พร้อมใช้งาน: <b style="color:#15803d;">${emReady}</b></span>
-            <span>ชำรุด: <b style="color:#dc2626;">${emIssue}</b></span>
-          </div>
-        </div>
-      </div>
-
-      <!-- ตารางวิเคราะห์รายอาคาร -->
-      <div class="report-section-title">2. ตารางสรุปผลการตรวจสอบจำแนกตามอาคาร (Building Compliance Summary)</div>
-      <table class="report-table">
-        <thead>
-          <tr>
-            <th style="width:40px; text-align:center;">ลำดับ</th>
-            <th>อาคาร / พื้นที่บริการ</th>
-            <th style="width:70px; text-align:center;">ทั้งหมด</th>
-            <th style="width:70px; text-align:center;">ตรวจแล้ว</th>
-            <th style="width:70px; text-align:center;">ปกติ</th>
-            <th style="width:70px; text-align:center;">ชำรุด</th>
-            <th style="width:90px; text-align:center;">ความพร้อม (%)</th>
-            <th style="width:140px; text-align:center;">สถานะประเมิน</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${buildingRowsHtml}
-        </tbody>
-      </table>
-
-      <!-- รายการข้อบกพร่องและแผนแก้ไข -->
-      <div class="report-section-title">3. รายการข้อบกพร่องและแผนปฏิบัติการแก้ไขเร่งด่วน (Defect Log & Action Required)</div>
-      ${defectHtml}
-
-      <!-- สรุปเชิงนโยบายและข้อเสนอแนะ -->
-      <div class="report-section-title">4. ข้อคิดเห็นและข้อเสนอแนะของคณะทำงานความปลอดภัย (ENV Committee Remarks)</div>
-      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:12px 14px; font-size:12.5px; line-height:1.6; color:#334155;">
-        <p style="margin:0 0 6px 0;">
-          1. <b>ภาพรวมความพร้อมใช้งาน:</b> อุปกรณ์ความปลอดภัยในส่วนหอผู้ป่วยและแผนกบริการวิกฤต (ICU, ER, ห้องผ่าตัด) มีความพร้อมใช้งานอยู่ในเกณฑ์ปลอดภัยสูง สอดคล้องกับข้อกำหนดการรับรองมาตรฐาน HA
-        </p>
-        <p style="margin:0 0 6px 0;">
-          2. <b>มาตรการแก้ไขเร่งด่วน:</b> สำหรับรายการที่พบข้อบกพร่อง (${issueCount} รายการ) งานอาคารสถานที่ได้ดำเนินการนำถังดับเพลิงสำรองไปติดตั้งสับเปลี่ยนในจุดที่ชำรุดเรียบร้อยแล้ว เพื่อมิให้เกิดช่องว่างความเสี่ยงในระหว่างรอส่งอัดบรรจุสารดับเพลิงและเปลี่ยนแบตเตอรี่
-        </p>
-        <p style="margin:0;">
-          3. <b>การบริหารจัดการงบประมาณ:</b> ขอเสนอขออนุมัติงบประมาณหมวดค่าบำรุงรักษาและซ่อมแซมครุภัณฑ์ ประจำปีงบประมาณ เพื่อดำเนินการจัดซื้อแบตเตอรี่สำรองและค่าบริการอัดบรรจุสารเคมีดับเพลิงตามตารางข้างต้น
-        </p>
-      </div>
-
-      <!-- 5. ส่วนลงนามผู้ตรวจเช็ก ผู้ตรวจสอบ และผู้อนุมัติสั่งการ (ต่อท้ายข้อ 4 ทันที) -->
-      <div class="report-section-title" style="margin-top:16px;">5. การรับรองผลการตรวจสอบและคำสั่งการผู้บริหาร (Sign-Off & Approval)</div>
-      <div style="margin-top:8px; padding:12px 14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; break-inside:avoid;">
-        <table style="width:100%; border-collapse:collapse; border:none;">
-          <tr>
-            <!-- ลำดับที่ 1: ผู้จัดทำรายงาน / ช่างผู้ตรวจ -->
-            <td style="width:33.33%; text-align:center; vertical-align:top; padding:0 8px;">
-              <p style="margin:0 0 6px 0; font-size:12px; color:#334155; font-weight:600;">ผู้จัดทำรายงาน / ผู้ตรวจเช็ก</p>
-              
-              <!-- ลายเซ็น/สถานะการลงนามของช่างผู้ตรวจ -->
-              <div id="tech-cert-container" style="margin-bottom:4px; min-height:26px;">
-                <!-- จะถูกเติมแบบไดนามิกโดย renderTechCertificationUI() -->
-              </div>
-
-              <div style="border-bottom:1px dotted #64748b; width:75%; margin:0 auto 4px auto;"></div>
-              <p style="margin:0; font-size:12px; font-weight:700; color:#0f172a;" id="report-display-tech-name">( ${authorName} )</p>
-              <p style="margin:2px 0 0 0; font-size:11px; color:#64748b;" id="report-display-tech-pos">${authorPos}</p>
-              <p style="margin:3px 0 0 0; font-size:11px; color:#64748b;" id="tech-sign-date-str">วันที่ ........ / ........ / ................</p>
-            </td>
-
-            <!-- ลำดับที่ 2: ผู้ตรวจสอบ / หัวหน้ากลุ่มงาน (Chef Inspector)  -->
-            <td style="width:33.33%; text-align:center; vertical-align:top; padding:0 8px;">
-              <p style="margin:0 0 6px 0; font-size:12px; color:#334155; font-weight:600;">ผู้ตรวจสอบ</p>
-
-              <!-- ลายเซ็น/สถานะการลงนามของผู้ตรวจสอบ -->
-              <div id="chef-cert-container" style="margin-bottom:4px; min-height:26px;">
-                <!-- จะถูกเติมแบบไดนามิกโดย renderChefCertificationUI() -->
-              </div>
-
-              <div style="border-bottom:1px dotted #64748b; width:75%; margin:0 auto 4px auto;"></div>
-              <p style="margin:0; font-size:12px; font-weight:700; color:#0f172a;" id="report-display-chef-name">( ${reviewerName} )</p>
-              <p style="margin:2px 0 0 0; font-size:11px; color:#64748b;" id="report-display-chef-pos">${reviewerPos}</p>
-              <p style="margin:3px 0 0 0; font-size:11px; color:#64748b;" id="chef-sign-date-str">วันที่ ........ / ........ / ................</p>
-            </td>
-
-            <!-- ลำดับที่ 3: ผู้อนุมัติ / ผู้อำนวยการโรงพยาบาล -->
-            <td style="width:33.33%; text-align:center; vertical-align:top; padding:0 8px;">
-              <p style="margin:0 0 4px 0; font-size:12px; color:#334155; font-weight:600;">คำสั่งการ / ผู้อนุมัติ</p>
-              
-              <!-- ปุ่มกดเลือกคำสั่งการบนหน้าจอ (สำหรับผู้บริหาร executive หรือ admin) -->
-              ${(currentUserRole === 'executive' || currentUserRole === 'admin') ? `
-                <div class="no-print" style="display:inline-flex; gap:6px; margin-bottom:4px; background:#f1f5f9; padding:2px 6px; border-radius:9999px; border:1px solid #cbd5e1;">
-                  <label style="display:flex; align-items:center; gap:4px; font-size:11px; font-weight:600; cursor:pointer; padding:2px 8px; border-radius:9999px; user-select:none; margin:0;"
-                    id="lbl-appr-ack" onclick="setExecutiveApproval('acknowledge')">
-                    <input type="radio" name="exec-decision" id="rad-appr-ack" value="acknowledge" style="cursor:pointer; accent-color:#0284c7; margin:0;" onchange="setExecutiveApproval('acknowledge')">
-                    <span>รับทราบ</span>
-                  </label>
-                  <label style="display:flex; align-items:center; gap:4px; font-size:11px; font-weight:600; cursor:pointer; padding:2px 8px; border-radius:9999px; user-select:none; margin:0;"
-                    id="lbl-appr-repair" onclick="setExecutiveApproval('repair')">
-                    <input type="radio" name="exec-decision" id="rad-appr-repair" value="repair" style="cursor:pointer; accent-color:#059669; margin:0;" onchange="setExecutiveApproval('repair')">
-                    <span>อนุมัติซ่อมแซม</span>
-                  </label>
-                </div>
-              ` : `
-                <div class="no-print" style="display:inline-flex; gap:8px; margin-bottom:4px; padding:2px 8px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px; font-size:11px; color:#64748b;">
-                  <span id="screen-view-ack">[ &nbsp; ] รับทราบ</span>
-                  <span id="screen-view-repair">[ &nbsp; ] อนุมัติซ่อมแซม</span>
-                </div>
-              `}
-
-              <!-- การแสดงผลคำสั่งการเวลาสั่งพิมพ์กระดาษ (Print View: ติ๊กถูกอัตโนมัติตามที่สั่งการ) -->
-              <div class="only-print" style="margin-bottom:4px; font-size:11.5px; color:#1e293b;">
-                <span style="margin-right:10px;" id="print-appr-ack">[ &nbsp; ] รับทราบ</span>
-                <span id="print-appr-repair">[ &nbsp; ] อนุมัติซ่อมแซม</span>
-              </div>
-
-              <!-- ลายเซ็น/สถานะการลงนามคำสั่งการของผู้บริหาร -->
-              <div id="exec-cert-container" style="margin-bottom:4px; min-height:26px;">
-                <!-- จะถูกเติมแบบไดนามิกโดย renderExecutiveCertificationUI() -->
-              </div>
-
-              <div style="border-bottom:1px dotted #64748b; width:75%; margin:0 auto 4px auto;"></div>
-              <p style="margin:0; font-size:12px; font-weight:700; color:#0f172a;" id="report-display-exec-name">( ${approverName} )</p>
-              <p style="margin:2px 0 0 0; font-size:11px; color:#64748b;">${approverPos}</p>
-              <p style="margin:3px 0 0 0; font-size:11px; color:#64748b;" id="exec-approval-date-str">วันที่ ........ / ........ / ................</p>
-            </td>
-          </tr>
-        </table>
-      </div>
-
-      <!-- เอกสารแนบท้าย: บัญชีทะเบียนการตรวจสอบอุปกรณ์ทั้งหมดในงวด (ถ้ามี จะขึ้นหน้าใหม่ต่อจากส่วนลงนาม) -->
-      ${includeAllItems ? `
-        <div class="page-break"></div>
-        <div class="report-section-title" style="margin-top:30px;">
-          เอกสารแนบท้าย: บัญชีทะเบียนการตรวจสอบอุปกรณ์ทั้งหมดในงวด (${totalAssets} จุด)
-        </div>
-        <p style="font-size:12px; color:#475569; margin:0 0 10px 0;">
-          รายละเอียดผลการประเมินสภาพความพร้อมใช้งานถังดับเพลิงและโคมไฟฉุกเฉินรายจุด ตามเกณฑ์มาตรฐาน HA (Part II: ENV)
-        </p>
-        <div class="report-table-scroll">
-          <table class="report-table" style="margin:0;">
-            <thead>
-              <tr style="position:sticky; top:0; background:#f1f5f9; z-index:2;">
-                <th style="width:35px; text-align:center;">#</th>
-                <th style="width:110px;">รหัสอุปกรณ์</th>
-                <th>ประเภท</th>
-                <th>อาคาร / จุดติดตั้ง</th>
-                <th style="width:90px; text-align:center;">สถานะ</th>
-                <th style="width:90px; text-align:center;">วันที่ตรวจ</th>
-                <th style="width:110px;">ผู้ตรวจ</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${allItemsRowsHtml}
-            </tbody>
-          </table>
-        </div>
-      ` : `
-        <div style="font-size:12px; color:#64748b; margin-top:20px; padding:10px 14px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px; font-style:italic;">
-          📌 <b>หมายเหตุ:</b> บัญชีทะเบียนผลการตรวจอุปกรณ์รายจุดครบทั้ง ${totalAssets} จุด ถูกบันทึกและจัดเก็บไว้ในฐานข้อมูลดิจิทัล (สามารถเลือกติ๊ก 'รวมบัญชีทะเบียนอุปกรณ์ทั้งหมด' ด้านบน หากต้องการพิมพ์เอกสารแนบท้ายฉบับสมบูรณ์)
-        </div>
-      `}
-
-    </div>
-  `;
-
-  container.innerHTML = fullReportHtml;
-  window.restoreExecutiveApproval();
-  if (typeof window.renderTechCertificationUI === 'function') {
-    window.renderTechCertificationUI();
-  }
-  if (typeof window.renderChefCertificationUI === 'function') {
-    window.renderChefCertificationUI();
-  }
-  if (typeof window.renderExecutiveCertificationUI === 'function') {
-    window.renderExecutiveCertificationUI();
-  }
-  container.scrollIntoView({ behavior: 'smooth' });
-};
-
-window.simulateFullInspection = function () {
-  if (currentUserRole === 'guest' || !currentUserRole) {
-    alert("🔒 โหมดผู้เยี่ยมชม (Guest) ดูข้อมูลได้อย่างเดียวเท่านั้น\nกรุณาเข้าสู่ระบบด้วยบัญชีเจ้าหน้าที่เพื่อดำเนินการนี้");
-    return;
-  }
-  if (!assetsList || assetsList.length === 0) {
-    alert("ไม่พบข้อมูลอุปกรณ์ในระบบ กำลังโหลดข้อมูลเริ่มต้น...");
-    initAssets();
-    return;
-  }
-
-  const now = new Date();
-  const officer = currentOfficer || "นายสมหมาย ใจดี (ช่างซ่อมบำรุง)";
-  const nowStr = now.toLocaleString('th-TH');
-  const nowIso = now.toISOString();
-
-  // สร้าง simulated logs ใหม่
-  const simLogs = [];
-
-  assetsList.forEach((asset, idx) => {
-    let status = "READY";
-    let notes = "ตรวจเช็กสภาพสมบูรณ์ พร้อมใช้งาน 100%";
-    let details = {};
-
-    const isFE = asset.assetId.startsWith('PYH-FE') || asset.type.includes('ถังดับเพลิง');
-
-    // จำลอง 3 จุดที่มีข้อบกพร่องตามสภาพการใช้งานจริงในโรงพยาบาล
-    if (asset.assetId === 'PYH-FE-ER1-01') {
-      status = "ISSUE";
-      details = { body: "PASS", pressure: "FAIL", access: "PASS" };
-      notes = "เกจ์วัดแรงดันตกต่ำกว่าขีดเขียว (Undercharged) และสายฉีดเริ่มมีรอยแตกลายงา";
-    } else if (asset.assetId === 'PYH-EM-HPC-02') {
-      status = "ISSUE";
-      details = { light: "PASS", test: "FAIL", plug: "PASS" };
-      notes = "กดปุ่มทดสอบ Test Switch แล้วไฟไม่สว่าง แบตเตอรี่เสื่อมสภาพไม่สำรองไฟ";
-    } else if (asset.assetId === 'PYH-FE-IPD-03') {
-      status = "ISSUE";
-      details = { body: "FAIL", pressure: "PASS", access: "PASS" };
-      notes = "สลักนิรภัย (Safety Pin) และสายซีลล็อคหลุดหาย ตัวถังมีรอยครูดถลอก";
-    } else {
-      if (isFE) {
-        details = { body: "PASS", pressure: "PASS", access: "PASS" };
-      } else {
-        details = { light: "PASS", test: "PASS", plug: "PASS" };
-      }
-    }
-
-    asset.status = status;
-    asset.lastChecked = nowIso;
-    asset.lastInspector = officer;
-
-    simLogs.push({
-      id: `SIM_LOG_${Date.now()}_${idx}`,
-      assetId: asset.assetId,
-      inspector: officer,
-      status: status,
-      details: details,
-      notes: notes,
-      photoURL: "",
-      timestampStr: nowStr,
-      timestampISO: nowIso
-    });
-  });
-
-  inspectionLogs = simLogs;
-  localStorage.setItem('pyh_assets_data', JSON.stringify(assetsList));
-  localStorage.setItem('pyh_inspection_logs', JSON.stringify(inspectionLogs));
-
-  updateDashboardUI();
-  renderMapPins();
-  renderHistoryTable();
-  window.renderSelectedReport();
-
-  alert(`⚡ จำลองผลการตรวจเช็กเสร็จสิ้นครบ 100% (${assetsList.length} จุดตรวจ)\n• ผลปกติพร้อมใช้งาน: ${assetsList.filter(a => a.status === 'READY').length} จุด\n• พบข้อบกพร่องแจ้งซ่อม: ${assetsList.filter(a => a.status === 'ISSUE').length} จุด (ER1-01, HPC-02, IPD-03)\nระบบได้ประมวลผลรายงานสรุปเสนอผู้บริหารให้ทันทีด้านล่าง!`);
-};
-
-window.printExecutiveReport = function () {
-  if (!requireLogin('สั่งพิมพ์รายงานสรุปผล')) return;
-  const reportContainer = document.getElementById('report-content-body');
-  if (!reportContainer || !reportContainer.innerHTML.trim()) {
-    window.renderSelectedReport();
-  }
-  
-  // ซ่อนแถบเครื่องมือด้วย JavaScript โดยตรงเพื่อหลีกเลี่ยงบั๊กจาก CSS Media Query
-  const toolbar = document.getElementById('executive-report-toolbar');
-  const header = document.querySelector('header');
-  const userBar = document.querySelector('.user-bar');
-  const navTabs = document.querySelector('.nav-tabs');
-  
-  // จำค่าเดิมไว้
-  const origToolbarDisplay = toolbar ? toolbar.style.getPropertyValue('display') : '';
-  const origHeaderDisplay = header ? header.style.getPropertyValue('display') : '';
-  const origUserBarDisplay = userBar ? userBar.style.getPropertyValue('display') : '';
-  const origNavTabsDisplay = navTabs ? navTabs.style.getPropertyValue('display') : '';
-
-  if (toolbar) toolbar.style.setProperty('display', 'none', 'important');
-  if (header) header.style.setProperty('display', 'none', 'important');
-  if (userBar) userBar.style.setProperty('display', 'none', 'important');
-  if (navTabs) navTabs.style.setProperty('display', 'none', 'important');
-
-  // ให้เวลาบราวเซอร์อัปเดตหน้าจอก่อนสั่งพิมพ์
-  setTimeout(() => {
-    window.print();
-    
-    // คืนค่ากลับหลังพิมพ์เสร็จหรือยกเลิก
-    if (toolbar) { if (origToolbarDisplay) toolbar.style.setProperty('display', origToolbarDisplay); else toolbar.style.removeProperty('display'); }
-    if (header) { if (origHeaderDisplay) header.style.setProperty('display', origHeaderDisplay); else header.style.removeProperty('display'); }
-    if (userBar) { if (origUserBarDisplay) userBar.style.setProperty('display', origUserBarDisplay); else userBar.style.removeProperty('display'); }
-    if (navTabs) { if (origNavTabsDisplay) navTabs.style.setProperty('display', origNavTabsDisplay); else navTabs.style.removeProperty('display'); }
-  }, 200);
-};
-
-window.setExecutiveApproval = async function (decision, syncCloud = true) {
-  const radAck = document.getElementById('rad-appr-ack');
-  const radRepair = document.getElementById('rad-appr-repair');
-  const lblAck = document.getElementById('lbl-appr-ack');
-  const lblRepair = document.getElementById('lbl-appr-repair');
-  const printAck = document.getElementById('print-appr-ack');
-  const printRepair = document.getElementById('print-appr-repair');
-  const dateStrEl = document.getElementById('exec-approval-date-str');
-
-  const isAck = (decision === 'acknowledge');
-
-  if (radAck) radAck.checked = isAck;
-  if (radRepair) radRepair.checked = !isAck;
-
-  // ปรับสไตล์ปุ่มที่ถูกเลือกบนหน้าจอ
-  if (lblAck) {
-    if (isAck) {
-      lblAck.style.background = '#0284c7';
-      lblAck.style.color = '#ffffff';
-      lblAck.style.boxShadow = '0 2px 6px rgba(2, 132, 199, 0.35)';
-    } else {
-      lblAck.style.background = 'transparent';
-      lblAck.style.color = '#334155';
-      lblAck.style.boxShadow = 'none';
-    }
-  }
-
-  if (lblRepair) {
-    if (!isAck) {
-      lblRepair.style.background = '#059669';
-      lblRepair.style.color = '#ffffff';
-      lblRepair.style.boxShadow = '0 2px 6px rgba(5, 150, 105, 0.35)';
-    } else {
-      lblRepair.style.background = 'transparent';
-      lblRepair.style.color = '#334155';
-      lblRepair.style.boxShadow = 'none';
-    }
-  }
-
-  // อัปเดตข้อความที่จะออกเวลาสั่งพิมพ์ลงกระดาษ A4
-  if (printAck) {
-    printAck.innerHTML = isAck ? '<b>[ ✓ ] รับทราบ</b>' : '[ &nbsp; ] รับทราบ';
-  }
-  if (printRepair) {
-    printRepair.innerHTML = !isAck ? '<b>[ ✓ ] อนุมัติซ่อมแซม</b>' : '[ &nbsp; ] อนุมัติซ่อมแซม';
-  }
-
-  // อัปเดตมุมมองบนหน้าจอสำหรับผู้ใช้ทั่วไปที่ไม่ใช่ผู้บริหาร (Read-only)
-  const screenAck = document.getElementById('screen-view-ack');
-  const screenRepair = document.getElementById('screen-view-repair');
-  if (screenAck) {
-    screenAck.innerHTML = isAck ? '<b style="color:#0284c7;">[ ✓ ] รับทราบ</b>' : '[ &nbsp; ] รับทราบ';
-  }
-  if (screenRepair) {
-    screenRepair.innerHTML = !isAck ? '<b style="color:#059669;">[ ✓ ] อนุมัติซ่อมแซม</b>' : '[ &nbsp; ] อนุมัติซ่อมแซม';
-  }
-
-  // บันทึกวันที่ปัจจุบัน (รูปแบบทางการ: วันที่ 8 กันยายน พ.ศ. 2569)
-  const today = new Date();
-  const fullThaiDateStr = formatThaiFullDate(today);
-  if (dateStrEl) {
-    dateStrEl.innerText = fullThaiDateStr;
-  }
-
-  // ลงนามดิจิทัลคำสั่งการของผู้บริหาร (ใช้เฉพาะชื่อ-นามสกุล)
-  const approverName = getCleanName(document.getElementById('report-approver-name')?.value.trim() || (currentUserRole === 'executive' ? currentOfficer : "นางสาวศิริพรรณ ชมพูภู่"));
-  const certData = {
-    approver: approverName,
-    decision: decision,
-    decisionLabel: isAck ? 'รับทราบ' : 'อนุมัติซ่อมแซม',
-    certifiedAt: today.toISOString(),
-    certifiedDateStr: fullThaiDateStr,
-    certifiedTimeStr: today.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-  };
-
-  try {
-    localStorage.setItem('pyh_executive_decision', JSON.stringify({
-      decision: decision,
-      savedAt: today.toISOString()
-    }));
-    localStorage.setItem('pyh_exec_certification', JSON.stringify(certData));
-  } catch (e) { }
-
-  // ซิงก์ขึ้น Firestore กลางทันที เฉพาะเมื่อ syncCloud เป็นจริง และผู้ใช้ได้ล็อกอินมีสิทธิ์เท่านั้น
-  const isExecOrAdmin = (currentUserRole === 'executive' || currentUserRole === 'admin');
-  if (syncCloud && isExecOrAdmin && isFirebaseReady() && db && auth && auth.currentUser) {
-    try {
-      await setDoc(doc(db, "system_state", "report_certifications"), {
-        exec_cert: certData,
-        exec_decision: { decision: decision, savedAt: today.toISOString() },
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      console.warn("Firestore sync exec_cert error:", e);
-    }
-  }
-
-  renderExecutiveCertificationUI();
-};
-
-window.revokeExecutiveApproval = async function () {
-  if (!confirm("ต้องการยกเลิกการลงนามคำสั่งการของผู้บริหารเพื่อแก้ไขใหม่ใช่ไหม?")) return;
-  localStorage.removeItem('pyh_exec_certification');
-  localStorage.removeItem('pyh_executive_decision');
-
-  if (isFirebaseReady() && db) {
-    try {
-      await setDoc(doc(db, "system_state", "report_certifications"), {
-        exec_cert: null,
-        exec_decision: null,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      console.warn("Firestore revoke exec_cert error:", e);
-    }
-  }
-
-  const printAck = document.getElementById('print-appr-ack');
-  const printRepair = document.getElementById('print-appr-repair');
-  if (printAck) printAck.innerHTML = '[ &nbsp; ] รับทราบ';
-  if (printRepair) printRepair.innerHTML = '[ &nbsp; ] อนุมัติซ่อมแซม';
-  const screenAck = document.getElementById('screen-view-ack');
-  const screenRepair = document.getElementById('screen-view-repair');
-  if (screenAck) screenAck.innerHTML = '[ &nbsp; ] รับทราบ';
-  if (screenRepair) screenRepair.innerHTML = '[ &nbsp; ] อนุมัติซ่อมแซม';
-  const dateStrEl = document.getElementById('exec-approval-date-str');
-  if (dateStrEl) dateStrEl.innerText = 'วันที่ ........ / ........ / ................';
-  renderExecutiveCertificationUI();
-};
-
-window.renderExecutiveCertificationUI = function () {
-  const container = document.getElementById('exec-cert-container');
-  const nameEl = document.getElementById('report-display-exec-name');
-  const dateEl = document.getElementById('exec-approval-date-str');
-  if (!container) return;
-
-  let cert = null;
-  try {
-    const raw = localStorage.getItem('pyh_exec_certification');
-    if (raw) cert = JSON.parse(raw);
-  } catch (e) { }
-
-  const defaultApprover = getCleanName(document.getElementById('report-approver-name')?.value.trim() || "นางสาวศิริพรรณ ชมพูภู่");
-  const canManage = (currentUserRole === 'executive' || currentUserRole === 'admin');
-
-  if (cert && cert.approver) {
-    const cleanName = getCleanName(cert.approver) || defaultApprover;
-    if (nameEl) nameEl.innerHTML = `( ${cleanName} )`;
-    
-    // แปลงวันที่ให้เป็นรูปแบบ "วันที่ 8 กันยายน พ.ศ. 2569" เสมอ
-    let displayDate = cert.certifiedDateStr;
-    if (!displayDate || displayDate.includes('/')) {
-      const dt = cert.certifiedAt ? new Date(cert.certifiedAt) : new Date();
-      displayDate = formatThaiFullDate(isNaN(dt.getTime()) ? new Date() : dt);
-    }
-    if (dateEl) dateEl.innerText = displayDate;
-
-    let sigVisualHtml = '';
-    if (cert.signatureImg) {
-      sigVisualHtml = `<img src="${cert.signatureImg}" alt="ลายมือชื่อ ผอ." style="max-height:48px; max-width:140px; object-fit:contain; display:block; margin:0 auto;">`;
-    } else {
-      sigVisualHtml = `
-        <span style="font-family:'TH Sarabun New', 'Sarabun', 'Cordia New', sans-serif; font-size:16px; font-weight:700; color:#0f172a; letter-spacing:0.5px; font-style:italic; line-height:1.2;">
-          ${cleanName}
-        </span>
-      `;
-    }
-
-    // แสดงเฉพาะลายมือชื่อ/รูปภาพลายเซ็นเหนือเส้นประ
-    container.innerHTML = `
-      <div style="min-height:36px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end;">
-        ${sigVisualHtml}
-        ${canManage ? `
-          <div class="no-print" style="display:flex; gap:6px; margin-top:2px;">
-            <button onclick="openSignatureModal('executive')"
-              style="background:none; border:none; color:#0284c7; font-size:9.5px; cursor:pointer; text-decoration:underline; padding:0;">
-              (วาด/เปลี่ยนลายเซ็น)
-            </button>
-            <button onclick="revokeExecutiveApproval()"
-              style="background:none; border:none; color:#dc2626; font-size:9.5px; cursor:pointer; text-decoration:underline; padding:0;">
-              (ยกเลิก)
-            </button>
-          </div>
-        ` : ''}
-      </div>
-    `;
-  } else {
-    if (nameEl) nameEl.innerHTML = `( ${defaultApprover} )`;
-    if (canManage) {
-      container.innerHTML = `
-        <div class="no-print" style="margin-bottom:4px; display:flex; gap:4px; justify-content:center;">
-          <button onclick="openSignatureModal('executive')" class="btn-sm"
-            style="background:linear-gradient(135deg, #0284c7, #0369a1); color:white; font-size:10.5px; padding:3px 10px; font-weight:700; border:none; border-radius:9999px; cursor:pointer; box-shadow:0 2px 5px rgba(2,132,199,0.25);">
-            ✍️ วาดลายเซ็น
-          </button>
-          <button onclick="setExecutiveApproval('acknowledge')" class="btn-sm"
-            style="background:linear-gradient(135deg, #00897b, #004d40); color:white; font-size:10.5px; padding:3px 10px; font-weight:700; border:none; border-radius:9999px; cursor:pointer; box-shadow:0 2px 5px rgba(0,105,92,0.25);">
-            ลงนามชื่อ
-          </button>
-        </div>
-        <div class="only-print" style="height:20px;"></div>
-      `;
-    } else {
-      container.innerHTML = `
-        <div class="no-print" style="display:inline-block; padding:3px 8px; background:#fffbeb; border:1px dashed #f59e0b; border-radius:6px; font-size:10.5px; color:#b45309;">
-          ⏳ รอผู้บริหารลงนามคำสั่งการ
-        </div>
-        <div class="only-print" style="height:20px;"></div>
-      `;
-    }
-  }
-};
-
-// ฟังก์ชันดึงค่าที่เคยเลือกไว้กลับมาแสดง
-window.restoreExecutiveApproval = function () {
-  try {
-    const rawCert = localStorage.getItem('pyh_exec_certification');
-    if (rawCert) {
-      const data = JSON.parse(rawCert);
-      if (data && data.decision) {
-        window.setExecutiveApproval(data.decision, false);
-        return;
-      }
-    }
-    const raw = localStorage.getItem('pyh_executive_decision');
-    if (raw) {
-      const data = JSON.parse(raw);
-      if (data && data.decision) {
-        window.setExecutiveApproval(data.decision, false);
-        return;
-      }
-    }
-  } catch (e) { }
-
-  if (currentUserRole === 'executive') {
-    const hasIssue = assetsList.some(a => a.status === 'ISSUE');
-    window.setExecutiveApproval(hasIssue ? 'repair' : 'acknowledge', false);
-  } else {
-    renderExecutiveCertificationUI();
-  }
-};
-
-window.autoLoadExecutiveFullReport = function () {
-  const reportControlsCard = document.getElementById('report-controls-card');
-  const execToolbar = document.getElementById('executive-report-toolbar');
-
-  if (reportControlsCard) reportControlsCard.style.display = 'none';
-  if (execToolbar) execToolbar.style.display = 'block';
-
-  if (typeof window.renderSelectedReport === 'function') {
-    window.renderSelectedReport();
-  }
-};
 
 // ==========================================
-// 12. การรับรองผลการตรวจเช็กโดยนายช่าง (Digital Technician Certification)
+// 11. ระบบสร้างรายงานการตรวจสอบเพื่อเสนอผู้บริหาร (แยกไปไว้ที่ js/report-module.js)
 // ==========================================
-window.certifyTechnicianInspection = async function () {
-  if (currentUserRole !== 'inspector' && currentUserRole !== 'admin') {
-    alert("❌ เฉพาะเจ้าหน้าที่ช่างตรวจเช็กหรือผู้ดูแลระบบเท่านั้นที่สามารถกดรับรองผลตรวจได้");
-    return;
-  }
+import { initReportModule } from './js/report-module.js';
 
-  const cleanName = getCleanName(currentOfficer) || "นายสุวิทย์ พวงสมบัติ";
-  const now = new Date();
-  const fullThaiDateStr = formatThaiFullDate(now);
-  const certData = {
-    officer: cleanName,
-    role: currentUserRole,
-    certifiedAt: now.toISOString(),
-    certifiedDateStr: fullThaiDateStr,
-    certifiedTimeStr: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-  };
+initReportModule({
+  getAssetsList: () => assetsList,
+  getCurrentOfficer: () => currentOfficer,
+  getCurrentUserRole: () => currentUserRole
+});
 
-  localStorage.setItem('pyh_tech_certification', JSON.stringify(certData));
-
-  // ซิงก์ขึ้น Firestore กลางทันที เพื่อให้อุปกรณ์เครื่องอื่นเห็นตราประทับตรงกัน
-  if (isFirebaseReady() && db) {
-    try {
-      await setDoc(doc(db, "system_state", "report_certifications"), {
-        tech_cert: certData,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      console.warn("Firestore sync tech_cert error:", e);
-    }
-  }
-
-  alert(`✍️ นายช่าง [${certData.officer}] ได้ลงนามรับรองผลการตรวจเช็กเรียบร้อยแล้ว!\nระบบได้ส่งข้อมูลนี้ไปยังรายงานของผู้บริหารแล้ว`);
-  renderTechCertificationUI();
-};
-
-window.revokeTechnicianInspection = async function () {
-  if (!confirm("ต้องการยกเลิกการลงนามรับรองผลตรวจเพื่อแก้ไขข้อมูลใหม่ใช่ไหม?")) return;
-  localStorage.removeItem('pyh_tech_certification');
-
-  if (isFirebaseReady() && db) {
-    try {
-      await setDoc(doc(db, "system_state", "report_certifications"), {
-        tech_cert: null,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      console.warn("Firestore revoke tech_cert error:", e);
-    }
-  }
-
-  const dateEl = document.getElementById('tech-sign-date-str');
-  if (dateEl) dateEl.innerText = 'วันที่ ........ / ........ / ................';
-  renderTechCertificationUI();
-};
-
-window.renderTechCertificationUI = function () {
-  const container = document.getElementById('tech-cert-container');
-  const nameEl = document.getElementById('report-display-tech-name');
-  const dateEl = document.getElementById('tech-sign-date-str');
-  if (!container) return;
-
-  let cert = null;
-  try {
-    const raw = localStorage.getItem('pyh_tech_certification');
-    if (raw) cert = JSON.parse(raw);
-  } catch (e) { }
-
-  const defaultTech = getCleanName(document.getElementById('report-author-name')?.value.trim() || "นายสุวิทย์ พวงสมบัติ");
-
-  if (cert && cert.officer) {
-    const cleanName = getCleanName(cert.officer) || defaultTech;
-    if (nameEl) nameEl.innerHTML = `( ${cleanName} )`;
-
-    // แปลงวันที่ให้เป็นรูปแบบ "วันที่ 8 กันยายน พ.ศ. 2569" เสมอ
-    let displayDate = cert.certifiedDateStr;
-    if (!displayDate || displayDate.includes('/')) {
-      const dt = cert.certifiedAt ? new Date(cert.certifiedAt) : new Date();
-      displayDate = formatThaiFullDate(isNaN(dt.getTime()) ? new Date() : dt);
-    }
-    if (dateEl) dateEl.innerText = displayDate;
-
-    const canRevoke = (currentUserRole === 'inspector' || currentUserRole === 'admin');
-
-    let sigVisualHtml = '';
-    if (cert.signatureImg) {
-      sigVisualHtml = `<img src="${cert.signatureImg}" alt="ลายมือชื่อ" style="max-height:48px; max-width:140px; object-fit:contain; display:block; margin:0 auto;">`;
-    } else {
-      sigVisualHtml = `
-        <span style="font-family:'TH Sarabun New', 'Sarabun', 'Cordia New', sans-serif; font-size:16px; font-weight:700; color:#0f172a; letter-spacing:0.5px; font-style:italic; line-height:1.2;">
-          ${cleanName}
-        </span>
-      `;
-    }
-
-    // แสดงเฉพาะลายมือชื่อ/ชื่อผู้ลงนามเหนือเส้นประ เหมือนลงนามในเอกสารราชการจริง (ไม่มีกรอบตราประทับ ไม่มีเวลา)
-    container.innerHTML = `
-      <div style="min-height:36px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end;">
-        ${sigVisualHtml}
-        ${canRevoke ? `
-          <div class="no-print" style="display:flex; gap:6px; margin-top:2px;">
-            <button onclick="openSignatureModal('inspector')"
-              style="background:none; border:none; color:#0284c7; font-size:9.5px; cursor:pointer; text-decoration:underline; padding:0;">
-              (วาด/เปลี่ยนลายเซ็น)
-            </button>
-            <button onclick="revokeTechnicianInspection()"
-              style="background:none; border:none; color:#dc2626; font-size:9.5px; cursor:pointer; text-decoration:underline; padding:0;">
-              (ยกเลิก)
-            </button>
-          </div>
-        ` : ''}
-      </div>
-    `;
-  } else {
-    if (nameEl) nameEl.innerHTML = `( ${defaultTech} )`;
-    if (currentUserRole === 'inspector' || currentUserRole === 'admin') {
-      container.innerHTML = `
-        <div class="no-print" style="margin-bottom:4px; display:flex; gap:4px; justify-content:center;">
-          <button onclick="openSignatureModal('inspector')" class="btn-sm"
-            style="background:linear-gradient(135deg, #0284c7, #0369a1); color:white; font-size:10.5px; padding:3px 10px; font-weight:700; border:none; border-radius:9999px; cursor:pointer; box-shadow:0 2px 5px rgba(2,132,199,0.25);">
-            ✍️ วาดลายเซ็น
-          </button>
-          <button onclick="certifyTechnicianInspection()" class="btn-sm"
-            style="background:linear-gradient(135deg, #00897b, #004d40); color:white; font-size:10.5px; padding:3px 10px; font-weight:700; border:none; border-radius:9999px; cursor:pointer; box-shadow:0 2px 5px rgba(0,105,92,0.25);">
-            รับรองชื่อ
-          </button>
-        </div>
-        <div class="only-print" style="height:20px;"></div>
-      `;
-    } else {
-      container.innerHTML = `
-        <div class="no-print" style="display:inline-block; padding:3px 8px; background:#fffbeb; border:1px dashed #f59e0b; border-radius:6px; font-size:10.5px; color:#b45309;">
-          ⏳ รอช่างเทคนิคลงนามรับรองผล
-        </div>
-        <div class="only-print" style="height:20px;"></div>
-      `;
-    }
-  }
-};
-
-// ==========================================
-// 13. การรับรองผลการตรวจสอบโดยหัวหน้าผู้ตรวจสอบ (Digital Reviewer / Chef Inspector Certification)
-// ==========================================
-window.certifyChefInspection = async function () {
-  const isChefOrAdmin = (currentUserRole === 'chef_inspector' || currentUserRole === 'chef inspector' || currentUserRole === 'admin');
-  if (!isChefOrAdmin) {
-    alert("❌ เฉพาะหัวหน้าผู้ตรวจสอบ (Chef Inspector) หรือผู้ดูแลระบบเท่านั้นที่สามารถกดรับรองผลการตรวจสอบได้");
-    return;
-  }
-
-  const cleanName = getCleanName(currentOfficer) || "นายคมสันต์ ศรีสิงห์";
-  const now = new Date();
-  const fullThaiDateStr = formatThaiFullDate(now);
-  const certData = {
-    officer: cleanName,
-    role: currentUserRole,
-    certifiedAt: now.toISOString(),
-    certifiedDateStr: fullThaiDateStr,
-    certifiedTimeStr: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-  };
-
-  localStorage.setItem('pyh_chef_certification', JSON.stringify(certData));
-
-  // ซิงก์ขึ้น Firestore กลางทันที เพื่อให้อุปกรณ์เครื่องอื่นเห็นตราประทับตรงกัน
-  if (isFirebaseReady() && db) {
-    try {
-      await setDoc(doc(db, "system_state", "report_certifications"), {
-        chef_cert: certData,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      console.warn("Firestore sync chef_cert error:", e);
-    }
-  }
-
-  alert(`✍️ ผู้ตรวจสอบ [${certData.officer}] ได้ลงนามรับรองผลการตรวจสอบเรียบร้อยแล้ว!\nระบบได้ส่งข้อมูลนี้ไปยังรายงานของผู้บริหารแล้ว`);
-  renderChefCertificationUI();
-};
-
-window.revokeChefInspection = async function () {
-  if (!confirm("ต้องการยกเลิกการลงนามรับรองผลการตรวจสอบเพื่อแก้ไขข้อมูลใหม่ใช่ไหม?")) return;
-  localStorage.removeItem('pyh_chef_certification');
-
-  if (isFirebaseReady() && db) {
-    try {
-      await setDoc(doc(db, "system_state", "report_certifications"), {
-        chef_cert: null,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      console.warn("Firestore revoke chef_cert error:", e);
-    }
-  }
-
-  const dateEl = document.getElementById('chef-sign-date-str');
-  if (dateEl) dateEl.innerText = 'วันที่ ........ / ........ / ................';
-  renderChefCertificationUI();
-};
-
-window.setChefApproval = function(choice) {
-  let cert = null;
-  try {
-    const raw = localStorage.getItem('pyh_chef_certification');
-    if (raw) cert = JSON.parse(raw);
-  } catch(e) {}
-
-  const prevSig = cert?.signatureImg || null;
-  const defaultChef = getCleanName(document.getElementById('report-reviewer-name')?.value.trim() || "นายคมสัน ศรีสิงห์");
-  const now = new Date();
-  const fullThaiDateStr = formatThaiFullDate(now);
-
-  const certData = {
-    officer: cert?.officer || defaultChef,
-    role: 'chef_inspector',
-    choice: choice, // 'ack' or 'approve'
-    signatureImg: prevSig,
-    certifiedAt: now.toISOString(),
-    certifiedDateStr: fullThaiDateStr,
-    certifiedTimeStr: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
-  };
-
-  localStorage.setItem('pyh_chef_certification', JSON.stringify(certData));
-  window.renderChefCertificationUI();
-};
-
-window.renderChefCertificationUI = function () {
-  const container = document.getElementById('chef-cert-container');
-  const memoContainer = document.getElementById('memo-chef-cert-container');
-  const nameEl = document.getElementById('report-display-chef-name');
-  const dateEl = document.getElementById('chef-sign-date-str');
-
-  let cert = null;
-  try {
-    const raw = localStorage.getItem('pyh_chef_certification');
-    if (raw) cert = JSON.parse(raw);
-  } catch (e) { }
-
-  const defaultChef = getCleanName(document.getElementById('report-reviewer-name')?.value.trim() || "นายคมสัน ศรีสิงห์");
-  const isChefOrAdmin = (currentUserRole === 'chef_inspector' || currentUserRole === 'chef inspector' || currentUserRole === 'admin');
-
-  // อัปเดตตัวเลือกในกล่องบันทึกข้อความ [ ] โปรดรับทราบ [ ] โปรดพิจารณาอนุมัติ
-  const choice = cert?.choice || 'ack';
-  const memoAckEl = document.getElementById('memo-chef-opt-ack');
-  const memoApproveEl = document.getElementById('memo-chef-opt-approve');
-  if (memoAckEl) {
-    memoAckEl.innerHTML = (choice === 'ack') ? '<b>[ ✓ ] โปรดรับทราบ</b>' : '[ &nbsp; ] โปรดรับทราบ';
-  }
-  if (memoApproveEl) {
-    memoApproveEl.innerHTML = (choice === 'approve') ? '<b>[ ✓ ] โปรดพิจารณาอนุมัติ</b>' : '[ &nbsp; ] โปรดพิจารณาอนุมัติ';
-  }
-
-  const cleanName = cert?.officer ? getCleanName(cert.officer) : defaultChef;
-
-  let sigVisualHtml = '';
-  if (cert && cert.signatureImg) {
-    sigVisualHtml = `<img src="${cert.signatureImg}" alt="ลายมือชื่อ หน.กลุ่มงาน" style="max-height:48px; max-width:140px; object-fit:contain; display:block; margin:0 auto;">`;
-  } else if (cert && cert.officer) {
-    sigVisualHtml = `
-      <span style="font-family:'TH Sarabun New', 'Sarabun', 'Cordia New', sans-serif; font-size:16px; font-weight:700; color:#0f172a; letter-spacing:0.5px; font-style:italic; line-height:1.2;">
-        ${cleanName}
-      </span>
-    `;
-  }
-
-  // เติมลง memoContainer ในบันทึกข้อความ
-  if (memoContainer) {
-    if (sigVisualHtml) {
-      memoContainer.innerHTML = `
-        <div style="min-height:36px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end;">
-          ${sigVisualHtml}
-          ${isChefOrAdmin ? `
-            <div class="no-print" style="display:flex; gap:6px; margin-top:2px;">
-              <button onclick="openSignatureModal('chef')"
-                style="background:none; border:none; color:#4338ca; font-size:9.5px; cursor:pointer; text-decoration:underline; padding:0;">
-                (วาด/เปลี่ยนลายเซ็น)
-              </button>
-              <button onclick="revokeChefInspection()"
-                style="background:none; border:none; color:#dc2626; font-size:9.5px; cursor:pointer; text-decoration:underline; padding:0;">
-                (ยกเลิก)
-              </button>
-            </div>
-          ` : ''}
-        </div>
-      `;
-    } else {
-      memoContainer.innerHTML = `
-        <div class="no-print" style="margin-bottom:4px;">
-          <button onclick="openSignatureModal('chef')" class="btn-sm"
-            style="background:linear-gradient(135deg, #4338ca, #3730a3); color:white; font-size:11px; padding:3px 12px; font-weight:700; border:none; border-radius:9999px; cursor:pointer; box-shadow:0 2px 6px rgba(67,56,202,0.25);">
-            ✍️ เซ็นชื่อ หน.กลุ่มงาน
-          </button>
-        </div>
-        <div class="only-print" style="height:20px;"></div>
-      `;
-    }
-  }
-
-  // เติมลง container ของรายงานสถิติละเอียด (Detailed Report)
-  if (container) {
-    if (nameEl) nameEl.innerHTML = `( ${cleanName} )`;
-
-    let displayDate = cert?.certifiedDateStr;
-    if (!displayDate || displayDate.includes('/')) {
-      const dt = cert?.certifiedAt ? new Date(cert.certifiedAt) : new Date();
-      displayDate = formatThaiFullDate(isNaN(dt.getTime()) ? new Date() : dt);
-    }
-    if (dateEl) dateEl.innerText = displayDate;
-
-    if (sigVisualHtml) {
-      container.innerHTML = `
-        <div style="min-height:24px; display:flex; flex-direction:column; align-items:center; justify-content:flex-end;">
-          ${sigVisualHtml}
-          ${isChefOrAdmin ? `
-            <button onclick="revokeChefInspection()" class="no-print"
-              style="background:none; border:none; color:#dc2626; font-size:9.5px; cursor:pointer; text-decoration:underline; margin-top:1px; padding:0;">
-              (ยกเลิก/ลงนามใหม่)
-            </button>
-          ` : ''}
-        </div>
-      `;
-    } else {
-      if (isChefOrAdmin) {
-        container.innerHTML = `
-          <div class="no-print" style="margin-bottom:4px;">
-            <button onclick="openSignatureModal('chef')" class="btn-sm"
-              style="background:linear-gradient(135deg, #4338ca, #3730a3); color:white; font-size:11px; padding:4px 12px; font-weight:700; border:none; border-radius:9999px; cursor:pointer; box-shadow:0 2px 6px rgba(67,56,202,0.25);">
-              ✍️ ลงนามรับรองผลตรวจ
-            </button>
-          </div>
-          <div class="only-print" style="height:20px;"></div>
-        `;
-      } else {
-        container.innerHTML = `
-          <div class="no-print" style="display:inline-block; padding:3px 8px; background:#fffbeb; border:1px dashed #f59e0b; border-radius:6px; font-size:10.5px; color:#b45309;">
-            ⏳ รอผู้ตรวจสอบรับรองผล
-          </div>
-          <div class="only-print" style="height:20px;"></div>
-        `;
-      }
-    }
-  }
-};
-
+// Sync ตัวแปรไปยัง window เพื่อความเข้ากันได้
+Object.defineProperty(window, 'assetsList', {
+  get: () => assetsList,
+  set: (val) => { assetsList = val; }
+});
+Object.defineProperty(window, 'currentOfficer', {
+  get: () => currentOfficer,
+  set: (val) => { currentOfficer = val; }
+});
+Object.defineProperty(window, 'currentUserRole', {
+  get: () => currentUserRole,
+  set: (val) => { currentUserRole = val; }
+});

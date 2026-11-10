@@ -1,0 +1,21 @@
+{
+  "name": "ระบบตรวจสอบความปลอดภัย โรงพยาบาลพยุหะคีรี",
+  "short_name": "Pyuha Safety",
+  "description": "ระบบตรวจสอบความปลอดภัยถังดับเพลิงและไฟฉุกเฉิน โรงพยาบาลพยุหะคีรี",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#004d40",
+  "icons": [
+    {
+      "src": "garuda.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "garuda.png",
+      "sizes": "56x61",
+      "type": "image/png"
+    }
+  ]
+}

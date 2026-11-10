@@ -8,7 +8,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?t=77777">
+  <link rel="stylesheet" href="style.css?v=1.0.0">
+  <link rel="stylesheet" href="js/ui-utilities.css?v=1.0.0">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#004d40">
 
   <!-- Leaflet CSS & JS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -63,7 +66,7 @@
           font-size: 0.95rem; font-family: 'Sarabun', sans-serif;
           box-sizing: border-box; outline: none;
         ">
-        <button id="ls-submit-btn" onclick="loginScreenSubmit()" style="
+        <button id="ls-submit-btn" data-action="login-screen-submit" style="
           width: 100%; padding: 12px; background: #004d40; color: white;
           border: none; border-radius: 8px; font-size: 1rem;
           font-family: 'Sarabun', sans-serif; font-weight: 600;
@@ -84,9 +87,9 @@
       <span class="role-tag" id="display-user-role">-</span>
     </div>
     <div>
-      <button onclick="openAuthModal()" class="btn-sm" style="background:#004d40; color:white; margin-right:6px;">🔑
+      <button data-action="open-auth-modal" class="btn-sm" style="background:#004d40; color:white; margin-right:6px;">🔑
         สลับบัญชี / เข้าสู่ระบบ</button>
-      <button onclick="logoutUser()" class="btn-sm btn-danger">ออกจากระบบ</button>
+      <button data-action="logout-user" class="btn-sm btn-danger">ออกจากระบบ</button>
     </div>
   </div>
 
@@ -96,20 +99,20 @@
 
     <div class="officer-badge">
       <span>ผู้ตรวจประจำเวร: <b id="current-officer-name">-</b></span>
-      <button id="btn-change-officer" onclick="setOfficerProfile()" class="btn-sm">เปลี่ยนชื่อผู้ตรวจ</button>
+      <button id="btn-change-officer" data-action="set-officer-profile" class="btn-sm">เปลี่ยนชื่อผู้ตรวจ</button>
     </div>
 
     <div class="nav-tabs">
-      <button id="tab-nav-dashboard" onclick="switchTab('dashboard')" class="tab-btn active">📊 แดชบอร์ด &
+      <button id="tab-nav-dashboard" data-action="switch-tab" data-param="dashboard" class="tab-btn active">📊 แดชบอร์ด &
         แผนผัง</button>
-      <button id="tab-nav-scanner" onclick="switchTab('scanner')" class="tab-btn">📷 สแกนตรวจเช็ก</button>
-      <button id="tab-nav-register" onclick="switchTab('register')" class="tab-btn">➕ ลงทะเบียนอุปกรณ์</button>
-      <button id="tab-nav-assets" onclick="switchTab('assets')" class="tab-btn">🏷️ รายการอุปกรณ์ (QR)</button>
-      <button id="tab-nav-history" onclick="switchTab('history')" class="tab-btn">📋 บันทึกประวัติการตรวจ</button>
-      <button id="tab-nav-report" onclick="switchTab('report')" class="tab-btn">📑 สรุปรายงานเสนอผู้บริหาร</button>
-      <button id="tab-nav-backup" onclick="switchTab('backup')" class="tab-btn" style="display:none;">💾
+      <button id="tab-nav-scanner" data-action="switch-tab" data-param="scanner" class="tab-btn">📷 สแกนตรวจเช็ก</button>
+      <button id="tab-nav-register" data-action="switch-tab" data-param="register" class="tab-btn">➕ ลงทะเบียนอุปกรณ์</button>
+      <button id="tab-nav-assets" data-action="switch-tab" data-param="assets" class="tab-btn">🏷️ รายการอุปกรณ์ (QR)</button>
+      <button id="tab-nav-history" data-action="switch-tab" data-param="history" class="tab-btn">📋 บันทึกประวัติการตรวจ</button>
+      <button id="tab-nav-report" data-action="switch-tab" data-param="report" class="tab-btn">📑 สรุปรายงานเสนอผู้บริหาร</button>
+      <button id="tab-nav-backup" data-action="switch-tab" data-param="backup" class="tab-btn" style="display:none;">💾
         สำรองและย้ายข้อมูล</button>
-      <button id="tab-nav-admin" onclick="switchTab('admin')" class="tab-btn"
+      <button id="tab-nav-admin" data-action="switch-tab" data-param="admin" class="tab-btn"
         style="display:none; background:#0f172a; border-color:#334155;">👨‍💼 จัดการช่าง (Admin)</button>
     </div>
   </header>
@@ -164,10 +167,10 @@
             <option value="building_canteen">🍲 อาคารโรงอาหาร</option>
           </select>
           <button type="button" class="btn-sm" style="background:#0284c7; color:white; padding:8px 14px;"
-            onclick="locateUserGPS()">📍 ตำแหน่งของฉัน (GPS)</button>
+            data-action="locate-gps">📍 ตำแหน่งของฉัน (GPS)</button>
           <button type="button" id="admin-add-asset-btn" class="btn-sm"
             style="display:none; background:#16a34a; color:white; padding:8px 16px; font-weight:700; border:none; border-radius:6px; cursor:pointer;"
-            onclick="startAddAssetOnDashboard()">➕ เพิ่มจุดติดตั้งใหม่บนผังนี้</button>
+            data-action="start-add-asset">➕ เพิ่มจุดติดตั้งใหม่บนผังนี้</button>
         </div>
 
         <!-- แถบปุ่มลัดสลับไปยังผังอาคารต่าง ๆ ทันที (Quick Building Switcher) -->
@@ -177,34 +180,34 @@
             🏢 <span>คลิกเปิดผังอาคาร:</span>
           </span>
           <div style="display:flex; flex-wrap:wrap; gap:6px;">
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('campus')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="campus"
               style="background:#0284c7; color:white; border-radius:20px; padding:5px 12px; font-size:0.8rem; border:none; cursor:pointer; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,0.1);">🌐
               ภาพรวมโรงพยาบาล</button>
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('building_er_lower')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="building_er_lower"
               style="background:#ffffff; color:#0f766e; border:1px solid #cbd5e1; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:600;">🏢
               อุบัติเหตุ (ชั้นล่าง)</button>
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('building_er_upper')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="building_er_upper"
               style="background:#ffffff; color:#0f766e; border:1px solid #cbd5e1; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:600;">🏢
               อุบัติเหตุ (ชั้นบน)</button>
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('building_hpc')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="building_hpc"
               style="background:#ffffff; color:#0f766e; border:1px solid #cbd5e1; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:600;">🏥
               ส่งเสริมสุขภาพ (HPC)</button>
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('building_ipd')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="building_ipd"
               style="background:#ffffff; color:#0f766e; border:1px solid #cbd5e1; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:600;">🛏️
               ผู้ป่วยใน (IPD)</button>
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('building_nisit')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="building_nisit"
               style="background:#ffffff; color:#0f766e; border:1px solid #cbd5e1; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:600;">🩺
               นิสิตคุณากร</button>
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('building_opd_dm')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="building_opd_dm"
               style="background:#ffffff; color:#0f766e; border:1px solid #cbd5e1; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:600;">🏥
               ตึกแก้วกัลยา</button>
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('building_pharma_rehab')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="building_pharma_rehab"
               style="background:#ffffff; color:#0f766e; border:1px solid #cbd5e1; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:600;">💊
               เวชศาสตร์ฯ-คลังยา</button>
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('building_thai_med')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="building_thai_med"
               style="background:#ffffff; color:#0f766e; border:1px solid #cbd5e1; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:600;">🌿
               แพทย์แผนไทย</button>
-            <button type="button" class="btn-sm bldg-nav-btn" onclick="selectBuildingFloor('building_canteen')"
+            <button type="button" class="btn-sm bldg-nav-btn" data-action="select-building-floor" data-param="building_canteen"
               style="background:#ffffff; color:#0f766e; border:1px solid #cbd5e1; border-radius:20px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-weight:600;">🍲
               โรงอาหาร</button>
           </div>
@@ -256,8 +259,8 @@
         </p>
         <div id="qr-reader"></div>
         <div style="text-align: center; margin-top: 10px;">
-          <button onclick="stopScanner()" class="btn-secondary" style="margin-right: 6px;">⏹️ ปิดกล้อง</button>
-          <button onclick="startScanner()" class="btn-sm" style="background:#0284c7; color:white; padding:8px 16px;">🔄
+          <button data-action="stop-scanner" class="btn-secondary" style="margin-right: 6px;">⏹️ ปิดกล้อง</button>
+          <button data-action="start-scanner" class="btn-sm" style="background:#0284c7; color:white; padding:8px 16px;">🔄
             เปิดกล้องใหม่</button>
         </div>
 
@@ -285,7 +288,7 @@
         <div
           style="margin-top:20px; border:1px solid #bbf7d0; background:linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%); border-radius:14px; padding:16px 18px; box-shadow:0 2px 8px rgba(0,0,0,0.03);">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-            <div style="display:flex; align-items:center; gap:8px; cursor:pointer;" onclick="toggleInspectionGuide()">
+            <div style="display:flex; align-items:center; gap:8px; cursor:pointer;" data-action="toggle-guide">
               <span style="font-size:1.25rem;">📖</span>
               <div>
                 <h4 style="margin:0; font-size:0.98rem; color:#166534; font-weight:700;">
@@ -295,11 +298,11 @@
               </div>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
-              <button type="button" id="btn-edit-guide" onclick="openEditGuideModal()"
+              <button type="button" id="btn-edit-guide" data-action="open-edit-guide"
                 style="background:#ffffff; color:#166534; border:1px solid #86efac; border-radius:20px; padding:4px 12px; font-size:0.8rem; font-weight:600; cursor:pointer; display:none; align-items:center; gap:4px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                 ✏️ แก้ไขคู่มือ
               </button>
-              <button type="button" id="btn-toggle-guide" onclick="toggleInspectionGuide()"
+              <button type="button" id="btn-toggle-guide" data-action="toggle-guide"
                 style="background:#dcfce7; color:#166534; border:1px solid #86efac; border-radius:20px; padding:4px 12px; font-size:0.8rem; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px;">
                 <span id="guide-toggle-text">ซ่อนคู่มือ</span> <span id="guide-toggle-icon">▲</span>
               </button>
@@ -540,7 +543,7 @@
           <h4>สติกเกอร์รหัสประจำอุปกรณ์</h4>
           <div id="qrcode"></div>
           <p id="qr-label" style="font-size:0.95rem; margin:10px 0;"></p>
-          <button onclick="window.print()" class="btn-secondary">🖨️ สั่งพิมพ์สติกเกอร์ติดอุปกรณ์</button>
+          <button data-action="print-window" class="btn-secondary">🖨️ สั่งพิมพ์สติกเกอร์ติดอุปกรณ์</button>
         </div>
       </div>
     </section>
@@ -568,11 +571,11 @@
             <input id="asset-search" type="text" placeholder="🔍 ค้นหารหัส / จุดติดตั้ง..."
               oninput="renderAssetListTable()"
               style="padding:7px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:0.85rem; min-width:180px;">
-            <button id="btn-print-all-qr" onclick="printAllQR()"
+            <button id="btn-print-all-qr" data-action="print-all-qr"
               style="background:#0284c7; color:white; border:none; border-radius:8px; padding:7px 14px; font-size:0.85rem; cursor:pointer;">
               🖨️ พิมพ์ QR ทั้งหมด
             </button>
-            <button id="admin-delete-all-btn" onclick="adminDeleteAllAssets()"
+            <button id="admin-delete-all-btn" data-action="admin-delete-all-assets"
               style="background:#fee2e2; color:#dc2626; border:1px solid #fca5a5; border-radius:8px; padding:7px 14px; font-size:0.85rem; font-weight:600; cursor:pointer;">
               🗑️ ลบอุปกรณ์ทั้งหมด
             </button>
@@ -614,7 +617,7 @@
             <h3 id="asset-modal-title" style="margin:0; font-size:1.15rem; color:#0f172a;">📜 ประวัติการตรวจเช็ก</h3>
             <p id="asset-modal-subtitle" style="margin:2px 0 0; font-size:0.83rem; color:#64748b;"></p>
           </div>
-          <button onclick="closeAssetHistoryModal()"
+          <button data-action="close-asset-history"
             style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#64748b; line-height:1;">✕</button>
         </div>
         <!-- Modal Body (ตารางประวัติ) -->
@@ -640,7 +643,7 @@
         <!-- Modal Footer -->
         <div
           style="padding:14px 24px; border-top:1px solid #e2e8f0; text-align:right; background:#f8fafc; border-radius:0 0 16px 16px;">
-          <button onclick="closeAssetHistoryModal()" class="btn-secondary"
+          <button data-action="close-asset-history" class="btn-secondary"
             style="margin:0; padding:7px 18px;">ปิดหน้าต่าง</button>
         </div>
       </div>
@@ -672,7 +675,7 @@
               style="width:100%; padding:9px 12px; margin-top:5px; border:1px solid #cbd5e1; border-radius:8px; font-size:0.92rem;"></textarea>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
-            <button type="button" onclick="closeRepairCompleteModal()" class="btn-secondary"
+            <button type="button" data-action="close-repair-modal" class="btn-secondary"
               style="padding:9px 16px; border-radius:8px;">ยกเลิก</button>
             <button type="submit" id="repair-submit-btn"
               style="background:#059669; color:white; border:none; padding:9px 20px; border-radius:8px; font-weight:600; cursor:pointer;">
@@ -684,7 +687,7 @@
     </div>
 
     <!-- Modal แก้ไขข้อมูลอุปกรณ์ (Edit Asset Modal) -->
-    <div id="edit-asset-modal" onclick="if(event.target===this) closeEditAssetModal()"
+    <div id="edit-asset-modal" 
       style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:8600; align-items:center; justify-content:center; padding:16px;">
       <div
         style="background:white; border-radius:16px; width:100%; max-width:540px; box-shadow:0 25px 60px rgba(0,0,0,0.4); overflow:hidden; max-height:90vh; display:flex; flex-direction:column;">
@@ -694,7 +697,7 @@
             <h3 id="edit-asset-modal-title" style="margin:0; font-size:1.15rem; color:white;">✏️ แก้ไขข้อมูลอุปกรณ์</h3>
             <p style="margin:2px 0 0; font-size:0.8rem; opacity:0.9;">ปรับปรุงข้อมูลรายละเอียด หรือแก้ไขข้อผิดพลาด</p>
           </div>
-          <button onclick="closeEditAssetModal()"
+          <button data-action="close-edit-asset"
             style="background:none; border:none; color:white; font-size:1.4rem; cursor:pointer; line-height:1;">✕</button>
         </div>
         <form id="edit-asset-form" onsubmit="event.preventDefault(); submitEditAsset();"
@@ -768,7 +771,7 @@
 
           <div
             style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid #f1f5f9; padding-top:14px;">
-            <button type="button" onclick="closeEditAssetModal()" class="btn-secondary"
+            <button type="button" data-action="close-edit-asset" class="btn-secondary"
               style="padding:9px 16px; border-radius:8px; margin:0;">ยกเลิก</button>
             <button type="submit" id="edit-asset-submit-btn"
               style="background:#0284c7; color:white; border:none; padding:9px 22px; border-radius:8px; font-weight:600; cursor:pointer; margin:0;">
@@ -780,7 +783,7 @@
     </div>
 
     <!-- Modal แก้ไขคู่มือขั้นตอนวิธีการตรวจ (Edit Inspection Guide Modal) -->
-    <div id="edit-guide-modal" onclick="if(event.target===this) closeEditGuideModal()"
+    <div id="edit-guide-modal" 
       style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:8600; align-items:center; justify-content:center; padding:16px;">
       <div
         style="background:white; border-radius:16px; width:100%; max-width:680px; box-shadow:0 25px 60px rgba(0,0,0,0.4); overflow:hidden; max-height:90vh; display:flex; flex-direction:column;">
@@ -791,7 +794,7 @@
             <p style="margin:2px 0 0; font-size:0.8rem; opacity:0.9;">
               ปรับปรุงหัวข้อและข้อปฏิบัติให้สอดคล้องกับมาตรฐานล่าสุดของโรงพยาบาล</p>
           </div>
-          <button type="button" onclick="closeEditGuideModal()"
+          <button type="button" data-action="close-edit-guide"
             style="background:none; border:none; color:white; font-size:1.4rem; cursor:pointer; line-height:1;">✕</button>
         </div>
         <form id="edit-guide-form" onsubmit="event.preventDefault(); submitEditGuide();"
@@ -819,12 +822,12 @@
 
           <div
             style="display:flex; justify-content:space-between; align-items:center; margin-top:20px; border-top:1px solid #f1f5f9; padding-top:14px;">
-            <button type="button" onclick="resetGuideToDefault()" class="btn-secondary"
+            <button type="button" data-action="reset-guide-default" class="btn-secondary"
               style="padding:9px 14px; border-radius:8px; margin:0; font-size:0.82rem; color:#b91c1c; border-color:#fecdd3; background:#fff1f2;">
               🔄 รีเซ็ตเป็นค่าเริ่มต้น
             </button>
             <div style="display:flex; gap:10px;">
-              <button type="button" onclick="closeEditGuideModal()" class="btn-secondary"
+              <button type="button" data-action="close-edit-guide" class="btn-secondary"
                 style="padding:9px 16px; border-radius:8px; margin:0;">ยกเลิก</button>
               <button type="submit" id="edit-guide-submit-btn"
                 style="background:#00695c; color:white; border:none; padding:9px 22px; border-radius:8px; font-weight:600; cursor:pointer; margin:0;">
@@ -845,13 +848,13 @@
         <div id="qr-modal-canvas" style="display:flex; justify-content:center; margin-bottom:12px;"></div>
         <p id="qr-modal-label" style="font-size:0.85rem; color:#475569; margin:0 0 20px;"></p>
         <div style="display:flex; gap:10px; justify-content:center;">
-          <button id="qr-modal-download-btn" onclick="downloadQR()"
+          <button id="qr-modal-download-btn" data-action="download-qr"
             style="background:#00695c; color:white; border:none; border-radius:8px; padding:10px 20px; cursor:pointer; font-size:0.9rem;">⬇️
             บันทึกภาพ</button>
-          <button id="qr-modal-print-btn" onclick="printQRModal()"
+          <button id="qr-modal-print-btn" data-action="print-qr-modal"
             style="background:#0284c7; color:white; border:none; border-radius:8px; padding:10px 20px; cursor:pointer; font-size:0.9rem;">🖨️
             พิมพ์</button>
-          <button onclick="closeQRModal()"
+          <button data-action="close-qr-modal"
             style="background:#e2e8f0; color:#374151; border:none; border-radius:8px; padding:10px 20px; cursor:pointer; font-size:0.9rem;">✕
             ปิด</button>
         </div>
@@ -916,19 +919,19 @@
         </p>
 
         <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:16px;">
-          <button onclick="syncAllAssetsToFirestore()" class="btn-primary"
+          <button data-action="sync-all-assets" class="btn-primary"
             style="flex:1; margin-top:0; background:#0284c7;">
             ☁️ อัปโหลดข้อมูลอุปกรณ์ทั้งหมดขึ้น Firebase (Sync to Cloud)
           </button>
-          <button onclick="cleanDuplicateAssetsFromCloud()" class="btn-secondary"
+          <button data-action="clean-duplicates" class="btn-secondary"
             style="flex:1; margin-top:0; background:#fff1f2; color:#be123c; border:1px solid #fecdd3; font-weight:600;">
             🧹 ล้างรายการอุปกรณ์ที่ซ้ำซ้อน (Clean Duplicates)
           </button>
-          <button onclick="adminDeleteAllAssets()" class="btn-secondary"
+          <button data-action="admin-delete-all-assets" class="btn-secondary"
             style="flex:1; margin-top:0; background:#fef2f2; color:#991b1b; border:1px solid #f87171; font-weight:700;">
             🗑️ ลบอุปกรณ์ทั้งหมดในระบบ (Clear All Assets)
           </button>
-          <button onclick="exportSystemData()" class="btn-primary" style="flex:1; margin-top:0; background:#00695c;">
+          <button data-action="export-system-data" class="btn-primary" style="flex:1; margin-top:0; background:#00695c;">
             📥 ดาวน์โหลดข้อมูลสำรอง (Export JSON)
           </button>
           <label class="btn-secondary"
@@ -970,30 +973,30 @@
             <!-- สลับรูปแบบรายงาน -->
             <div
               style="background:rgba(255,255,255,0.15); padding:3px; border-radius:8px; display:inline-flex; gap:3px;">
-              <button id="btn-mode-memo" onclick="setReportFormat('memo')" class="btn-sm"
+              <button id="btn-mode-memo" data-action="set-report-format" data-param="memo" class="btn-sm"
                 style="background:#ffffff; color:#004d40; font-weight:700; font-size:0.85rem; padding:6px 12px; border-radius:6px; border:none; cursor:pointer;">
                 📄 บันทึกข้อความ (ราชการ)
               </button>
-              <button id="btn-mode-detailed" onclick="setReportFormat('detailed')" class="btn-sm"
+              <button id="btn-mode-detailed" data-action="set-report-format" data-param="detailed" class="btn-sm"
                 style="background:transparent; color:#ffffff; font-weight:600; font-size:0.85rem; padding:6px 12px; border-radius:6px; border:none; cursor:pointer;">
                 📊 รายงานสถิติละเอียด
               </button>
             </div>
 
-            <button id="btn-simulate-full" onclick="simulateFullInspection()" class="btn-sm"
+            <button id="btn-simulate-full" data-action="simulate-inspection" class="btn-sm"
               style="background:#0284c7; color:#ffffff; font-weight:600; font-size:0.88rem; padding:8px 14px; border-radius:8px; border:none; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.15);">
               ⚡ จำลองผลตรวจ 100%
             </button>
-            <button onclick="renderSelectedReport()" class="btn-sm"
+            <button data-action="render-selected-report" class="btn-sm"
               style="background:#059669; color:#ffffff; font-weight:600; font-size:0.88rem; padding:8px 14px; border-radius:8px; border:none; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.15);">
               🔄 รีเฟรชรายงาน
             </button>
-            <button id="btn-toggle-memo-toolbar" onclick="toggleMemoEditToolbar()" class="btn-sm"
+            <button id="btn-toggle-memo-toolbar" data-action="toggle-memo-toolbar" class="btn-sm"
               title="คลิกเพื่อ เปิด/ซ่อน แถบเครื่องมือปรับฟอนต์ ระยะขอบ และลายเซ็น"
               style="background:#f59e0b; color:#1e293b; font-weight:700; font-size:0.88rem; padding:8px 14px; border-radius:8px; border:none; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.15); display:inline-flex; align-items:center; gap:5px;">
               ✏️ <span>ปรับแต่งรายละเอียด / จัดหน้า</span>
             </button>
-            <button id="btn-print-executive-report" onclick="printExecutiveReport()" class="btn-sm"
+            <button id="btn-print-executive-report" data-action="print-executive-report" class="btn-sm"
               style="background:#ffffff; color:#004d40; font-weight:700; font-size:0.92rem; padding:8px 18px; border-radius:8px; border:none; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2);">
               🖨️ สั่งพิมพ์ / บันทึก PDF (A4)
             </button>
@@ -1022,14 +1025,14 @@
                 <option value="body">เนื้อหา (ความเป็นมา/พิจารณา/ข้อเสนอ)</option>
                 <option value="sign">ส่วนลงนาม & กล่องเสนอ/อนุมัติ</option>
               </select>
-              <button onclick="adjustTargetMemoFont(-1)" title="ลดขนาดตัวอักษร"
+              <button data-action="adjust-memo-font" data-param="-1" title="ลดขนาดตัวอักษร"
                 style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:2px 7px; cursor:pointer; font-weight:700; font-size:0.82rem;">A-</button>
               <input type="number" id="memo-font-size-input" value="16" min="8" max="48" step="0.5"
                 onchange="setMemoFontExact(this.value)" oninput="setMemoFontExact(this.value)"
                 title="พิมพ์ระบุขนาดตัวอักษร (pt) ได้โดยตรงเหมือน MS Word"
                 style="width:48px; text-align:center; background:#ffffff; color:#0f172a; border:1px solid #94a3b8; border-radius:6px; padding:2px 4px; font-weight:700; font-size:0.82rem;">
               <span style="color:#ffffff; font-size:0.8rem; font-weight:600;">pt</span>
-              <button onclick="adjustTargetMemoFont(1)" title="เพิ่มขนาดตัวอักษร"
+              <button data-action="adjust-memo-font" data-param="1" title="เพิ่มขนาดตัวอักษร"
                 style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:2px 7px; cursor:pointer; font-weight:700; font-size:0.82rem;">A+</button>
             </div>
 
@@ -1073,7 +1076,7 @@
               </label>
               <span style="color:#e2e8f0; font-size:0.75rem;">ซม.</span>
 
-              <button onclick="setMemoMarginPresetStandard()"
+              <button data-action="set-memo-margin-standard"
                 title="คืนค่าระยะขอบมาตรฐานงานสารบรรณ (บน 2.0, ล่าง 2.0, ซ้าย 2.5, ขวา 2.0 ซม.)"
                 style="background:rgba(255,255,255,0.25); color:#ffffff; border:1px solid rgba(255,255,255,0.3); border-radius:4px; padding:1px 6px; font-size:0.75rem; cursor:pointer; font-weight:600;">มาตรฐาน</button>
             </div>
@@ -1083,23 +1086,23 @@
             <!-- ปรับระยะบรรทัด -->
             <div style="display:flex; align-items:center; gap:4px;">
               <span style="color:#e2e8f0; font-size:0.82rem;">ระยะบรรทัด:</span>
-              <button onclick="adjustMemoSpacing(-0.1)" title="บีบบรรทัดกระชับขึ้น"
+              <button data-action="adjust-memo-spacing" data-param="-0.1" title="บีบบรรทัดกระชับขึ้น"
                 style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:0.82rem;">บีบ</button>
-              <button onclick="adjustMemoSpacing(0.1)" title="ขยายระยะบรรทัด"
+              <button data-action="adjust-memo-spacing" data-param="0.1" title="ขยายระยะบรรทัด"
                 style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:0.82rem;">ขยาย</button>
             </div>
 
             <!-- ปรับตำแหน่งกล่อง ผอ. -->
             <div style="display:flex; align-items:center; gap:4px;">
               <span style="color:#e2e8f0; font-size:0.82rem;">กล่อง ผอ.:</span>
-              <button onclick="setExecBoxPosition('left')" id="btn-exec-pos-left" title="วางกล่อง ผอ. ฝั่งซ้ายล่าง"
+              <button data-action="set-exec-box-position" data-param="left" id="btn-exec-pos-left" title="วางกล่อง ผอ. ฝั่งซ้ายล่าง"
                 style="background:#ffffff; color:#004d40; border:none; border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:700; font-size:0.82rem;">ซ้าย</button>
-              <button onclick="setExecBoxPosition('right')" id="btn-exec-pos-right"
+              <button data-action="set-exec-box-position" data-param="right" id="btn-exec-pos-right"
                 title="วางกล่อง ผอ. ฝั่งขวา (ต่อท้าย)"
                 style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:600; font-size:0.82rem;">ขวา</button>
-              <button onclick="adjustExecBoxMarginTop(-5)" title="เลื่อนกล่อง ผอ. ขึ้น"
+              <button data-action="adjust-exec-box-top" data-param="-5" title="เลื่อนกล่อง ผอ. ขึ้น"
                 style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:3px 6px; cursor:pointer; font-size:0.82rem;">▲</button>
-              <button onclick="adjustExecBoxMarginTop(5)" title="เลื่อนกล่อง ผอ. ลง"
+              <button data-action="adjust-exec-box-top" data-param="5" title="เลื่อนกล่อง ผอ. ลง"
                 style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:3px 6px; cursor:pointer; font-size:0.82rem;">▼</button>
             </div>
 
@@ -1107,16 +1110,16 @@
 
             <!-- ลายเซ็น: ช่าง, หน.กลุ่มงาน, ผอ. -->
             <div style="display:flex; align-items:center; gap:4px;">
-              <button onclick="openSignatureModal('inspector')" title="วาดหรืออัปโหลดรูปภาพลายเซ็นของเจ้าหน้าที่ช่าง"
+              <button data-action="open-signature-modal" data-param="inspector" title="วาดหรืออัปโหลดรูปภาพลายเซ็นของเจ้าหน้าที่ช่าง"
                 style="background:#0284c7; color:white; border:none; border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:600; font-size:0.8rem; display:flex; align-items:center; gap:3px;">
                 ✍️ <span>เซ็นชื่อช่าง</span>
               </button>
-              <button onclick="openSignatureModal('chef')"
+              <button data-action="open-signature-modal" data-param="chef"
                 title="วาดหรืออัปโหลดรูปภาพลายเซ็นของหัวหน้ากลุ่มงานบริหารทั่วไป"
                 style="background:#4338ca; color:white; border:none; border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:600; font-size:0.8rem; display:flex; align-items:center; gap:3px;">
                 ✍️ <span>เซ็นชื่อ หน.กลุ่มงาน</span>
               </button>
-              <button onclick="openSignatureModal('executive')" title="วาดหรืออัปโหลดรูปภาพลายเซ็นของผู้อำนวยการ"
+              <button data-action="open-signature-modal" data-param="executive" title="วาดหรืออัปโหลดรูปภาพลายเซ็นของผู้อำนวยการ"
                 style="background:#0f766e; color:white; border:none; border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:600; font-size:0.8rem; display:flex; align-items:center; gap:3px;">
                 ✍️ <span>เซ็นชื่อ ผอ.</span>
               </button>
@@ -1125,7 +1128,7 @@
             <span style="color:rgba(255,255,255,0.4);">|</span>
 
             <!-- รีเซ็ตเป็นข้อความเดิม -->
-            <button onclick="resetMemoContent()" title="คืนค่าข้อความเริ่มต้นจากระบบ"
+            <button data-action="reset-memo-content" title="คืนค่าข้อความเริ่มต้นจากระบบ"
               style="background:rgba(239,68,68,0.25); color:#fee2e2; border:1px solid rgba(248,113,113,0.4); border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.82rem;">
               🔄 รีเซ็ตเดิม
             </button>
@@ -1194,7 +1197,7 @@
             <h4 style="margin:0; color:#0f172a; font-size:1.05rem; display:flex; align-items:center; gap:8px;">
               <span>📋 ทะเบียนผู้ใช้งานในระบบ & ตรวจสอบการยืนยันตัวตน</span>
             </h4>
-            <button onclick="renderAdminUserList()" class="btn-sm"
+            <button data-action="render-admin-users" class="btn-sm"
               style="background:#f1f5f9; color:#00695c; border:1px solid #cbd5e1;">
               🔄 รีเฟรชรายชื่อ
             </button>
@@ -1226,10 +1229,10 @@
   <!-- ============================================== -->
   <!-- MODAL: เข้าสู่ระบบ / ลงทะเบียนผู้ใช้งาน -->
   <!-- ============================================== -->
-  <div id="auth-modal" class="modal-overlay hidden" onclick="if(event.target===this) closeAuthModal()">
-    <div class="auth-card" onclick="event.stopPropagation()">
+  <div id="auth-modal" class="modal-overlay hidden" >
+    <div class="auth-card" >
       <!-- ปุ่มปิด Modal (X) -->
-      <button class="modal-close-btn" onclick="closeAuthModal()" title="ปิดหน้าต่าง">✕</button>
+      <button class="modal-close-btn" data-action="close-auth-modal" title="ปิดหน้าต่าง">✕</button>
 
       <!-- ส่วนหัว Header พร้อมแบรนด์ รพ.พยุหะคีรี -->
       <div class="auth-header">
@@ -1241,10 +1244,10 @@
       <div class="auth-body">
         <!-- สวิตช์สลับแท็บ เข้าสู่ระบบ / ลงทะเบียน -->
         <div class="auth-tab-switch">
-          <button type="button" id="tab-btn-login" class="auth-switch-btn active" onclick="toggleAuthMode('login')">
+          <button type="button" id="tab-btn-login" class="auth-switch-btn active" data-action="toggle-auth-mode" data-param="login">
             🔐 เข้าสู่ระบบ (Sign In)
           </button>
-          <button type="button" id="tab-btn-register" class="auth-switch-btn" onclick="toggleAuthMode('register')">
+          <button type="button" id="tab-btn-register" class="auth-switch-btn" data-action="toggle-auth-mode" data-param="register">
             📝 ลงทะเบียน (Register)
           </button>
         </div>
@@ -1275,7 +1278,7 @@
           </form>
 
           <p style="text-align:center; font-size:0.85rem; margin-top:16px; color:#64748b;">
-            ยังไม่มีบัญชีผู้ใช้งาน? <a href="#" onclick="toggleAuthMode('register')"
+            ยังไม่มีบัญชีผู้ใช้งาน? <a href="#" data-action="toggle-auth-mode" data-param="register"
               style="color:#00695c; font-weight:700;">ลงทะเบียนเจ้าหน้าที่ใหม่</a>
           </p>
         </div>
@@ -1338,7 +1341,7 @@
           </form>
 
           <p style="text-align:center; font-size:0.85rem; margin-top:16px; color:#64748b;">
-            มีบัญชีอยู่แล้ว? <a href="#" onclick="toggleAuthMode('login')"
+            มีบัญชีอยู่แล้ว? <a href="#" data-action="toggle-auth-mode" data-param="login"
               style="color:#00695c; font-weight:700;">กลับไปหน้าเข้าสู่ระบบ</a>
           </p>
         </div>
@@ -1354,9 +1357,9 @@
   <!-- ============================================== -->
   <!-- MODAL: เพิ่มอุปกรณ์ใหม่บนแดชบอร์ด (Admin Quick Add) -->
   <!-- ============================================== -->
-  <div id="quick-add-modal" class="modal-overlay hidden" onclick="if(event.target===this) closeQuickAddModal()">
-    <div class="auth-card" style="max-width:480px;" onclick="event.stopPropagation()">
-      <button class="modal-close-btn" onclick="closeQuickAddModal()" title="ปิด">✕</button>
+  <div id="quick-add-modal" class="modal-overlay hidden" >
+    <div class="auth-card" style="max-width:480px;" >
+      <button class="modal-close-btn" data-action="close-quick-add" title="ปิด">✕</button>
 
       <div class="auth-header" style="background:linear-gradient(135deg, #004d40, #00695c);">
         <div class="auth-logo-badge">➕</div>
@@ -1398,7 +1401,7 @@
           </div>
 
           <div style="display:flex; gap:10px; margin-top:20px;">
-            <button type="button" onclick="closeQuickAddModal()" class="btn-secondary" style="flex:1; margin-top:0;">
+            <button type="button" data-action="close-quick-add" class="btn-secondary" style="flex:1; margin-top:0;">
               ยกเลิก
             </button>
             <button type="submit" class="btn-primary" style="flex:2; margin-top:0; background:#00695c;">
@@ -1413,9 +1416,9 @@
   <!-- ============================================== -->
   <!-- MODAL: แก้ไขข้อมูลผู้ใช้งาน (Admin Edit User) -->
   <!-- ============================================== -->
-  <div id="admin-edit-user-modal" class="modal-overlay hidden" onclick="if(event.target===this) closeAdminEditUserModal()">
-    <div class="auth-card" style="max-width:480px;" onclick="event.stopPropagation()">
-      <button class="modal-close-btn" onclick="closeAdminEditUserModal()" title="ปิด">✕</button>
+  <div id="admin-edit-user-modal" class="modal-overlay hidden" >
+    <div class="auth-card" style="max-width:480px;" >
+      <button class="modal-close-btn" data-action="close-admin-edit-user" title="ปิด">✕</button>
 
       <div class="auth-header" style="background:linear-gradient(135deg, #b45309, #d97706);">
         <div class="auth-logo-badge">✏️</div>
@@ -1460,9 +1463,9 @@
   <!-- ============================================== -->
   <!-- MODAL: วาดหรืออัปโหลดลายเซ็นเจ้าหน้าที่ (Signature Pad Modal) -->
   <!-- ============================================== -->
-  <div id="signature-modal" class="modal-overlay hidden" onclick="if(event.target===this) closeSignatureModal()">
-    <div class="auth-card" style="max-width:440px;" onclick="event.stopPropagation()">
-      <button class="modal-close-btn" onclick="closeSignatureModal()" title="ปิด">✕</button>
+  <div id="signature-modal" class="modal-overlay hidden" >
+    <div class="auth-card" style="max-width:440px;" >
+      <button class="modal-close-btn" data-action="close-signature-modal" title="ปิด">✕</button>
 
       <div class="auth-header" style="background:linear-gradient(135deg, #0284c7, #0369a1); padding:16px 20px;">
         <div class="auth-logo-badge" style="width:42px; height:42px; font-size:22px;">✍️</div>
@@ -1475,11 +1478,11 @@
       <div class="auth-body" style="padding:18px 20px;">
         <!-- ตัวเลือกแท็บ วาด vs อัปโหลด -->
         <div style="display:flex; gap:8px; margin-bottom:12px; background:#f1f5f9; padding:3px; border-radius:8px;">
-          <button type="button" id="tab-sig-draw-btn" onclick="switchSigTab('draw')"
+          <button type="button" id="tab-sig-draw-btn" data-action="switch-sig-tab" data-param="draw"
             style="flex:1; padding:6px; font-size:0.82rem; font-weight:700; border:none; border-radius:6px; background:white; color:#0284c7; cursor:pointer;">
             ✏️ วาดลายเซ็น
           </button>
-          <button type="button" id="tab-sig-upload-btn" onclick="switchSigTab('upload')"
+          <button type="button" id="tab-sig-upload-btn" data-action="switch-sig-tab" data-param="upload"
             style="flex:1; padding:6px; font-size:0.82rem; font-weight:600; border:none; border-radius:6px; background:transparent; color:#64748b; cursor:pointer;">
             📁 อัปโหลดรูปภาพ
           </button>
@@ -1497,7 +1500,7 @@
             </div>
           </div>
           <div style="text-align:right; margin-top:6px;">
-            <button type="button" onclick="clearSignatureCanvas()"
+            <button type="button" data-action="clear-signature-canvas"
               style="background:none; border:none; color:#dc2626; font-size:0.8rem; cursor:pointer; text-decoration:underline;">
               ล้างหน้าจอวาดใหม่
             </button>
@@ -1510,7 +1513,7 @@
             style="border:1.5px dashed #cbd5e1; border-radius:10px; padding:24px 16px; text-align:center; background:#fafafa;">
             <input type="file" id="sig-file-input" accept="image/*" onchange="handleSigFileUpload(event)"
               style="display:none;">
-            <button type="button" onclick="document.getElementById('sig-file-input').click()"
+            <button type="button" data-action="trigger-sig-upload"
               style="background:#0284c7; color:white; border:none; border-radius:8px; padding:8px 16px; font-size:0.85rem; font-weight:600; cursor:pointer;">
               📷 เลือกไฟล์รูปภาพลายเซ็น (PNG/JPG)
             </button>
@@ -1522,10 +1525,10 @@
         </div>
 
         <div style="display:flex; gap:10px; margin-top:16px;">
-          <button type="button" onclick="closeSignatureModal()" class="btn-secondary" style="flex:1; margin-top:0;">
+          <button type="button" data-action="close-signature-modal" class="btn-secondary" style="flex:1; margin-top:0;">
             ยกเลิก
           </button>
-          <button type="button" onclick="saveSignature()" class="btn-primary"
+          <button type="button" data-action="save-signature" class="btn-primary"
             style="flex:2; margin-top:0; background:#0284c7;">
             💾 นำลายเซ็นไปใช้
           </button>
@@ -1537,7 +1540,7 @@
   <!-- แจ้งเตือนสถานะการย้ายพิกัดหมุด (Admin Map Toast) -->
   <div id="map-toast-notification" class="map-toast"></div>
 
-  <script type="module" src="app.js?t=77777"></script>
+  <script type="module" src="app.js?v=1.0.0"></script>
 </body>
 
 </html>

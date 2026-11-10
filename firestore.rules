@@ -2,9 +2,74 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // ตรวจสอบสถานะการยืนยันตัวตน
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // ดึงข้อมูลบัญชีผู้ใช้ปัจจุบันจากคอลเลกชัน system_users
+    function getUserData() {
+      return get(/databases/$(database)/documents/system_users/$(request.auth.token.email.replace('[^a-zA-Z0-9]', '_'))).data;
+    }
+    
+    // ตรวจสอบบทบาท Admin
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        getUserData().role == 'admin'
+      );
+    }
+    
+    // ตรวจสอบสิทธิ์เจ้าหน้าที่ผู้ตรวจ / นายช่าง
+    function isInspectorOrAdmin() {
+      return isAuthenticated() && (
+        getUserData().role in ['admin', 'inspector', 'chef_inspector']
+      );
+    }
+
+    // 1. ตารางอุปกรณ์ (Assets)
+    // - อ่านได้ทุกคน (Guest / Staff)
+    // - เพิ่ม แก้ไข ลบ เฉพาะ Admin หรือ Inspector เท่านั้น
+    match /assets/{assetId} {
+      allow read: if true;
+      allow create, update: if isInspectorOrAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // 2. ตารางบันทึกการตรวจสอบ (Inspection Logs)
+    // - อ่านได้ทุกคน
+    // - บันทึกผลตรวจ ต้องเป็นผู้ใช้ที่เข้าสู่ระบบ
+    // - ห้ามผู้ตรวจทั่วไปลบประวัติการตรวจ (เฉพาะ Admin เท่านั้น)
+    match /inspection_logs/{logId} {
+      allow read: if true;
+      allow create, update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+    
+    // 3. ตารางข้อมูลผู้ใช้งานและระดับสิทธิ์ (System Users)
+    // - ต้องล็อกอินถึงจะอ่านได้
+    // - การแก้ไขระดับสิทธิ์หรือลบบัญชี ต้องเป็น Admin เท่านั้น
+    match /system_users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // 4. การตั้งค่าระบบและการรับรองเอกสาร (System Configs & State)
+    match /system_configs/{configId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /system_state/{stateId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+    
+    // ปิดกั้นที่เหลือทั้งหมด (Deny by default)
     match /{document=**} {
-      // Allow anyone to read and write (development only)
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
