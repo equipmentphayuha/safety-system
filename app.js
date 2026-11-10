@@ -211,6 +211,15 @@ async function onLoginSuccess(officer, role) {
 
   hideLoginScreen();
   await initAssets(); // โหลดข้อมูลหลัง login เท่านั้น
+
+  // หากมีรายการที่ตั้งใจจะตรวจค้างไว้ (Pending Inspect Asset) ให้พาเข้าแบบฟอร์มตรวจต่อทันที
+  if (window._pendingInspectAssetId) {
+    const target = window._pendingInspectAssetId;
+    window._pendingInspectAssetId = null;
+    setTimeout(() => {
+      window.openInspectionForm(target);
+    }, 250);
+  }
 }
 
 // ฟังก์ชัน login จากหน้า Login Screen (ไม่ใช่ modal)
@@ -1639,9 +1648,8 @@ window.stopScanner = function () {
 // ==========================================
 // 5. จัดการแบบฟอร์มตรวจสอบ (Checklist FE vs EM)
 // ==========================================
-window.handleScanned = function (rawInput) {
-  if (!rawInput) return;
-  const assetId = extractAssetIdFromScan(rawInput);
+// เปิดหน้าแบบฟอร์มตรวจเช็ก (สำหรับเจ้าหน้าที่ที่ผ่านการ Login แล้ว)
+window.openInspectionForm = function (assetId) {
   if (!requireLogin('บันทึกผลการตรวจ')) return;
   const asset = assetsList.find(a => a.assetId && a.assetId.toLowerCase() === assetId.toLowerCase());
   if (!asset) {
@@ -1679,6 +1687,28 @@ window.handleScanned = function (rawInput) {
 
   document.getElementById('inspection-form-card').classList.remove('hidden');
   document.getElementById('inspection-form-card').scrollIntoView({ behavior: 'smooth' });
+};
+
+// จุดรับผลการสแกน (ฉลาดแยกแยะ: ถ้า Login อยู่แล้ว -> เปิดฟอร์มตรวจทันที, ถ้าเป็น Guest/คนนอก -> แสดงหน้ารายงานประวัติก่อน)
+window.handleScanned = function (rawInput) {
+  if (!rawInput) return;
+  const assetId = extractAssetIdFromScan(rawInput);
+  const asset = assetsList.find(a => a.assetId && a.assetId.toLowerCase() === assetId.toLowerCase());
+  if (!asset) {
+    alert(`ไม่พบอุปกรณ์รหัส "${assetId}" ในระบบ กรุณาตรวจสอบหรือลงทะเบียนใหม่`);
+    return;
+  }
+
+  const session = getSession();
+  const isLoggedIn = (session && session.officer && currentUserRole !== 'guest');
+
+  if (isLoggedIn) {
+    // เจ้าหน้าที่เข้าสู่ระบบแล้ว -> เปิดหน้าบันทึกตรวจเช็กทันที
+    window.openInspectionForm(assetId);
+  } else {
+    // คนนอก / ยังไม่ล็อกอิน -> แสดงการ์ดข้อมูลประวัติและการรับรองก่อน พร้อมปุ่มกดเข้าตรวจเช็ก
+    window.showAssetHistoryModal(asset.assetId);
+  }
 };
 
 // บันทึกผลการตรวจเช็ก
@@ -2436,20 +2466,46 @@ window.adminDeleteAllAssets = async function () {
   }
 };
 
-// ฟังก์ชันเปิดดูประวัติการตรวจเฉพาะอุปกรณ์ชิ้นนี้
+// ฟังก์ชันเปิดดูประวัติการตรวจเฉพาะอุปกรณ์ชิ้นนี้ (Public Tag & History)
+let _currentModalAssetId = null;
 window.showAssetHistoryModal = function (assetId) {
   const asset = assetsList.find(a => a.assetId?.toLowerCase() === assetId?.toLowerCase());
   const modal = document.getElementById('asset-history-modal');
   const titleEl = document.getElementById('asset-modal-title');
   const subEl = document.getElementById('asset-modal-subtitle');
   const rowsEl = document.getElementById('asset-history-modal-rows');
+  const statusBadge = document.getElementById('asset-modal-status-badge');
+  const lastCheckEl = document.getElementById('asset-modal-last-check');
 
   if (!modal || !rowsEl) return;
+  _currentModalAssetId = asset ? asset.assetId : assetId;
 
   const logs = inspectionLogs.filter(l => l.assetId?.toLowerCase() === assetId?.toLowerCase());
 
-  titleEl.innerText = `📜 ประวัติการตรวจ: ${assetId}`;
+  titleEl.innerText = `📋 ข้อมูลอุปกรณ์: ${asset ? asset.assetId : assetId}`;
   subEl.innerText = `${asset?.type || 'อุปกรณ์ความปลอดภัย'} • ${asset?.building || ''} (${asset?.location || '-'})`;
+
+  // อัปเดตสถานะปัจจุบัน
+  if (statusBadge && asset) {
+    if (asset.status === 'READY') {
+      statusBadge.innerHTML = '<span style="color:#16a34a;">🟢 ปกติ พร้อมใช้งาน (READY)</span>';
+    } else if (asset.status === 'REPAIRING') {
+      statusBadge.innerHTML = '<span style="color:#d97706;">🔧 อยู่ระหว่างส่งซ่อม (REPAIRING)</span>';
+    } else {
+      statusBadge.innerHTML = '<span style="color:#dc2626;">⚠️ พบปัญหา ชำรุด (ISSUE)</span>';
+    }
+  }
+
+  if (lastCheckEl) {
+    const latestLog = logs[0];
+    if (latestLog) {
+      lastCheckEl.innerText = `${latestLog.timestampStr || latestLog.timestampISO || '-'} (${latestLog.inspector || 'ช่างเทคนิค'})`;
+    } else if (asset && asset.lastChecked) {
+      lastCheckEl.innerText = asset.lastChecked;
+    } else {
+      lastCheckEl.innerText = 'ยังไม่มีประวัติการตรวจ';
+    }
+  }
 
   if (logs.length === 0) {
     rowsEl.innerHTML = `
@@ -2476,6 +2532,17 @@ window.showAssetHistoryModal = function (assetId) {
   }
 
   modal.style.display = 'flex';
+};
+
+// นำทางจาก Modal สู่แบบฟอร์มตรวจเช็ก (ถ้ายังไม่ล็อกอิน requireLogin จะเด้งเข้าหน้า login ก่อน แล้วกลับมาทำต่อ)
+window.goToInspectFromModal = function () {
+  const assetId = _currentModalAssetId;
+  closeAssetHistoryModal();
+  if (assetId) {
+    // บันทึกเป้าหมายไว้ เพื่อหลัง login สำเร็จจะได้เด้งมาเปิดฟอร์มจุดนี้ต่อทันที
+    window._pendingInspectAssetId = assetId;
+    window.openInspectionForm(assetId);
+  }
 };
 
 window.closeAssetHistoryModal = function () {

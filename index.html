@@ -622,6 +622,19 @@
         </div>
         <!-- Modal Body (ตารางประวัติ) -->
         <div style="padding:20px 24px; overflow-y:auto; flex:1;">
+          <!-- กล่องสรุปสถานะปัจจุบันของอุปกรณ์ (Inspection Tag) -->
+          <div id="asset-modal-status-card" style="margin-bottom:16px; padding:12px 16px; border-radius:12px; background:#f1f5f9; border:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div>
+              <span style="font-size:0.8rem; color:#64748b; font-weight:600; text-transform:uppercase;">สถานะปัจจุบัน</span>
+              <div id="asset-modal-status-badge" style="font-weight:700; font-size:1rem; margin-top:2px;">-</div>
+            </div>
+            <div style="text-align:right;">
+              <span style="font-size:0.8rem; color:#64748b; font-weight:600;">ตรวจเช็กล่าสุด</span>
+              <div id="asset-modal-last-check" style="font-size:0.88rem; color:#1e293b; font-weight:600; margin-top:2px;">-</div>
+            </div>
+          </div>
+
+          <h4 style="font-size:0.92rem; color:#334155; margin:0 0 8px 0; font-weight:600;">📋 บันทึกประวัติการตรวจสอบย้อนหลัง</h4>
           <div class="table-responsive">
             <table style="width:100%;">
               <thead>
@@ -642,9 +655,13 @@
         </div>
         <!-- Modal Footer -->
         <div
-          style="padding:14px 24px; border-top:1px solid #e2e8f0; text-align:right; background:#f8fafc; border-radius:0 0 16px 16px;">
+          style="padding:14px 24px; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border-radius:0 0 16px 16px; flex-wrap:wrap; gap:10px;">
+          <button id="asset-modal-inspect-btn" onclick="goToInspectFromModal()" class="btn-primary"
+            style="margin:0; padding:9px 20px; font-weight:600; background:#00695c; display:flex; align-items:center; gap:6px;">
+            📝 สำหรับเจ้าหน้าที่: บันทึกผลตรวจเช็ก
+          </button>
           <button data-action="close-asset-history" class="btn-secondary"
-            style="margin:0; padding:7px 18px;">ปิดหน้าต่าง</button>
+            style="margin:0; padding:8px 18px;">ปิดหน้าต่าง</button>
         </div>
       </div>
     </div>
