@@ -17,9 +17,10 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- QR Code Scanner & Generator -->
+  <!-- QR Code Scanner & Generator & Card Exporter -->
   <script src="https://unpkg.com/html5-qrcode"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 
 <body>
@@ -148,9 +149,23 @@
         </div>
       </div>
 
-      <!-- แผนผังอาคารแบบ Interactive -->
+      <!-- แผนผังอาคารแบบ Interactive และโหมดรายการนำทางสำหรับช่าง -->
       <div class="card">
-        <h3>🗺️ ผังพิกัดอุปกรณ์ความปลอดภัย (Interactive Safety Map)</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+          <h3 style="margin:0;">🗺️ จุดตรวจเช็กความปลอดภัย (Safety Map & Routing)</h3>
+          
+          <!-- ปุ่มสลับโหมด ผังอาคาร vs รายการช่าง -->
+          <div style="display:inline-flex; background:#f1f5f9; padding:3px; border-radius:8px; border:1px solid #cbd5e1;">
+            <button type="button" id="btn-view-map" onclick="switchMapViewMode('map')"
+              style="border:none; background:#00695c; color:#fff; padding:6px 14px; border-radius:6px; font-size:0.82rem; font-weight:700; cursor:pointer; transition:all 0.2s;">
+              🗺️ แผนผัง
+            </button>
+            <button type="button" id="btn-view-list" onclick="switchMapViewMode('list')"
+              style="border:none; background:transparent; color:#475569; padding:6px 14px; border-radius:6px; font-size:0.82rem; font-weight:600; cursor:pointer; transition:all 0.2s;">
+              📋 ลำดับเดินตรวจ (ช่าง)
+            </button>
+          </div>
+        </div>
 
         <div class="map-controls">
           <label for="map-mode-select" style="font-size:0.9rem; font-weight:600; margin:0;">เลือกอาคาร / โซน:</label>
@@ -226,10 +241,15 @@
         <div id="map-add-asset-banner" style="display:none;"></div>
 
         <div id="floor-map"></div>
-        <p style="font-size:0.82rem; color:#64748b; margin-top:8px;">
+        <p id="map-legend-hint" style="font-size:0.82rem; color:#64748b; margin-top:8px;">
           * จุดสีเขียว = อุปกรณ์พร้อมใช้งาน | จุดสีแดง = ชำรุด/รอแก้ไข |
           คลิกที่จุดเพื่อดูรายละเอียดและกดบันทึกตรวจเช็กทันที
         </p>
+
+        <!-- โหมดรายการลำดับการเดินตรวจสำหรับช่าง (Technician Routing List) -->
+        <div id="tech-routing-list" style="display:none; margin-top:12px;">
+          <!-- Rendered by app.js renderTechRoutingList() -->
+        </div>
 
         <!-- รายการอุปกรณ์และลำดับประจำโซน/อาคารนี้ (Quick Asset Index List) -->
         <div id="dashboard-asset-quicklist-container"
@@ -339,93 +359,9 @@
             </div>
           </div>
 
-          <!-- 1. รายการตรวจเช็กสำหรับถังดับเพลิง (Fire Extinguisher) -->
-          <div id="fe-checklist-fields">
-            <div
-              style="background:#fff1f2; border:1px solid #fecdd3; border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:0.82rem; color:#991b1b; display:flex; align-items:center; gap:6px;">
-              <span>🧯 <b>คำแนะนำตรวจถังดับเพลิง:</b> ตรวจสอบสภาพรอบตัวถัง เช็กระดับแรงดัน
-                และแน่ใจว่าเข้าถึงได้สะดวก</span>
-            </div>
-
-            <div style="margin-bottom:10px;">
-              <label style="display:flex; justify-content:space-between; align-items:center;">
-                <span>1. สภาพภายนอก, คันบีบ, สายฉีด, ซีลและสลักล็อก:</span>
-                <span style="font-size:0.75rem; color:#0284c7; font-weight:600;">วิธีตรวจ: ดูรอยบุบ/สนิม,
-                  ดึงสลักต้องแน่น, สายยางไม่อุดตัน</span>
-              </label>
-              <select id="fe-body" required>
-                <option value="PASS">✅ ปกติ (สมบูรณ์ สลักล็อกแน่นหนา ไม่แตกหัก)</option>
-                <option value="FAIL">❌ ชำรุด (สลักหลุด / สายแตก / ตัวถังบุบสนิม)</option>
-              </select>
-            </div>
-
-            <div style="margin-bottom:10px;">
-              <label style="display:flex; justify-content:space-between; align-items:center;">
-                <span>2. เกจวัดแรงดัน (Pressure Gauge):</span>
-                <span style="font-size:0.75rem; color:#0284c7; font-weight:600;">วิธีตรวจ: สังเกตหน้าปัด
-                  เข็มต้องชี้แถบสีเขียวตรงกลาง</span>
-              </label>
-              <select id="fe-pressure" required>
-                <option value="PASS">✅ ปกติ (เข็มชี้อยู่ในแถบสีเขียว)</option>
-                <option value="FAIL">❌ ผิดปกติ (เข็มตกแถบแดง / แรงดันต่ำหรือสูงเกิน)</option>
-              </select>
-            </div>
-
-            <div style="margin-bottom:10px;">
-              <label style="display:flex; justify-content:space-between; align-items:center;">
-                <span>3. สภาพแวดล้อมและทางเข้าถึง:</span>
-                <span style="font-size:0.75rem; color:#0284c7; font-weight:600;">วิธีตรวจ: รัศมี 1 เมตรไม่มีสิ่งของบัง
-                  ป้ายตำแหน่งชัดเจน</span>
-              </label>
-              <select id="fe-access" required>
-                <option value="PASS">✅ ปกติ (ไม่มีสิ่งของวางกีดขวาง หยิบใช้งานได้ทันที)</option>
-                <option value="FAIL">❌ มีสิ่งของวางบดบังหรือขวางทางเข้าถึง</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- 2. รายการตรวจเช็กสำหรับไฟฉุกเฉิน (Emergency Light) -->
-          <div id="em-checklist-fields" class="hidden">
-            <div
-              style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:0.82rem; color:#0369a1; display:flex; align-items:center; gap:6px;">
-              <span>💡 <b>คำแนะนำตรวจไฟฉุกเฉิน:</b> ตรวจไฟสถานะ AC และกดปุ่ม TEST จำลองไฟดับเพื่อทดสอบแบตเตอรี่</span>
-            </div>
-
-            <div style="margin-bottom:10px;">
-              <label style="display:flex; justify-content:space-between; align-items:center;">
-                <span>1. สภาพภายนอกและปลั๊กไฟ:</span>
-                <span style="font-size:0.75rem; color:#0284c7; font-weight:600;">วิธีตรวจ: ตรวจตัวถัง เสียบปลั๊กแน่น
-                  สายไฟไม่ขาด</span>
-              </label>
-              <select id="em-plug" required>
-                <option value="PASS">✅ ปกติ (ตัวเครื่องและปลั๊กไฟแน่นหนา ไม่ชำรุด)</option>
-                <option value="FAIL">❌ ชำรุด (ปลั๊กหลวม / สายไฟชำรุด / โคมแตก)</option>
-              </select>
-            </div>
-
-            <div style="margin-bottom:10px;">
-              <label style="display:flex; justify-content:space-between; align-items:center;">
-                <span>2. ไฟแสดงสถานะไฟเข้า (AC Indicator):</span>
-                <span style="font-size:0.75rem; color:#0284c7; font-weight:600;">วิธีตรวจ: สังเกตไฟ LED
-                  หน้าเครื่องต้องติดสว่าง</span>
-              </label>
-              <select id="em-light" required>
-                <option value="PASS">✅ ปกติ (ไฟ LED แสดงสถานะไฟเข้าติดสว่าง)</option>
-                <option value="FAIL">❌ ผิดปกติ (ไฟ AC ไม่ติด / ไฟไม่เข้า)</option>
-              </select>
-            </div>
-
-            <div style="margin-bottom:10px;">
-              <label style="display:flex; justify-content:space-between; align-items:center;">
-                <span>3. การทดสอบปุ่ม Test (แบตเตอรี่สำรอง):</span>
-                <span style="font-size:0.75rem; color:#0284c7; font-weight:600;">วิธีตรวจ: กดปุ่ม Test ค้าง 5 วินาที
-                  หลอดต้องสว่างทั้งคู่</span>
-              </label>
-              <select id="em-test" required>
-                <option value="PASS">✅ ปกติ (กดปุ่ม Test แล้วหลอดไฟสว่างทั้ง 2 ดวง)</option>
-                <option value="FAIL">❌ ผิดปกติ (ไฟไม่ติด หรือติดเพียงดวงเดียว / แบตเตอรี่เสื่อม)</option>
-              </select>
-            </div>
+          <!-- รายการตรวจเช็กแบบไดนามิกตามประเภทอุปกรณ์ (Dynamic Checklist Container) -->
+          <div id="dynamic-checklist-container">
+            <!-- Rendered by js/checklist-config.js -->
           </div>
 
           <!-- ภาพถ่ายหลักฐาน -->
@@ -856,23 +792,38 @@
       </div>
     </div>
 
-    <!-- modal แสดง QR ขนาดใหญ่ -->
+    <!-- modal แสดง QR ป้ายตรวจเช็กความปลอดภัย -->
     <div id="qr-modal"
-      style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:8000; align-items:center; justify-content:center;">
+      style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:8000; align-items:center; justify-content:center; padding:12px;">
       <div
-        style="background:white; border-radius:16px; padding:32px; text-align:center; max-width:360px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,0.4);">
-        <h3 id="qr-modal-title" style="margin:0 0 16px; font-size:1.1rem; color:#0f172a;">QR Code</h3>
-        <div id="qr-modal-canvas" style="display:flex; justify-content:center; margin-bottom:12px;"></div>
-        <p id="qr-modal-label" style="font-size:0.85rem; color:#475569; margin:0 0 20px;"></p>
-        <div style="display:flex; gap:10px; justify-content:center;">
+        style="background:white; border-radius:16px; padding:24px 20px; text-align:center; max-width:380px; width:100%; box-shadow:0 20px 60px rgba(0,0,0,0.4); max-height:92vh; overflow-y:auto;">
+        <h3 id="qr-modal-title" style="margin:0 0 12px; font-size:1.05rem; color:#0f172a;">ป้ายตรวจเช็ก QR ประจำจุด</h3>
+        
+        <!-- พรีวิวบัตรป้ายตรวจเช็ก (Sticker Preview สำหรับ Print และ Save Image) -->
+        <div id="qr-tag-card-preview" style="background:#ffffff; border:2px solid #0f172a; border-radius:8px; padding:12px 10px; margin:0 auto 16px; width:280px; box-sizing:border-box; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <div style="border-bottom:2px solid #004d40; padding-bottom:6px; margin-bottom:8px;">
+            <div style="font-size:0.78rem; font-weight:700; color:#004d40; text-transform:uppercase; letter-spacing:0.5px;">🏥 โรงพยาบาลพยุหะคีรี</div>
+            <div style="font-size:0.68rem; font-weight:600; color:#64748b;">FIRE & SAFETY INSPECTION TAG</div>
+          </div>
+          
+          <div id="qr-modal-canvas" style="display:flex; justify-content:center; align-items:center; margin:8px 0; min-height:160px;"></div>
+          
+          <div id="qr-modal-label" style="font-size:0.8rem; color:#1e293b; margin:6px 0 0; line-height:1.35;"></div>
+          
+          <div style="border-top:1px dashed #cbd5e1; margin-top:8px; padding-top:6px; font-size:0.65rem; color:#64748b;">
+            📷 สแกนผ่าน LINE / กล้องมือถือ เพื่อตรวจ & ดูประวัติ
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
           <button id="qr-modal-download-btn" data-action="download-qr"
-            style="background:#00695c; color:white; border:none; border-radius:8px; padding:10px 20px; cursor:pointer; font-size:0.9rem;">⬇️
-            บันทึกภาพ</button>
+            style="background:#00695c; color:white; border:none; border-radius:8px; padding:8px 14px; cursor:pointer; font-size:0.85rem; font-weight:600;">⬇️
+            บันทึกภาพบัตร</button>
           <button id="qr-modal-print-btn" data-action="print-qr-modal"
-            style="background:#0284c7; color:white; border:none; border-radius:8px; padding:10px 20px; cursor:pointer; font-size:0.9rem;">🖨️
-            พิมพ์</button>
+            style="background:#0284c7; color:white; border:none; border-radius:8px; padding:8px 14px; cursor:pointer; font-size:0.85rem; font-weight:600;">🖨️
+            พิมพ์สติ๊กเกอร์</button>
           <button data-action="close-qr-modal"
-            style="background:#e2e8f0; color:#374151; border:none; border-radius:8px; padding:10px 20px; cursor:pointer; font-size:0.9rem;">✕
+            style="background:#e2e8f0; color:#374151; border:none; border-radius:8px; padding:8px 14px; cursor:pointer; font-size:0.85rem;">✕
             ปิด</button>
         </div>
       </div>
@@ -1109,36 +1060,11 @@
                 style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:3px 7px; cursor:pointer; font-size:0.82rem;">ขยาย</button>
             </div>
 
-            <!-- ปรับตำแหน่งกล่อง ผอ. -->
-            <div style="display:flex; align-items:center; gap:4px;">
-              <span style="color:#e2e8f0; font-size:0.82rem;">กล่อง ผอ.:</span>
-              <button data-action="set-exec-box-position" data-param="left" id="btn-exec-pos-left" title="วางกล่อง ผอ. ฝั่งซ้ายล่าง"
-                style="background:#ffffff; color:#004d40; border:none; border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:700; font-size:0.82rem;">ซ้าย</button>
-              <button data-action="set-exec-box-position" data-param="right" id="btn-exec-pos-right"
-                title="วางกล่อง ผอ. ฝั่งขวา (ต่อท้าย)"
-                style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:600; font-size:0.82rem;">ขวา</button>
-              <button data-action="adjust-exec-box-top" data-param="-5" title="เลื่อนกล่อง ผอ. ขึ้น"
-                style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:3px 6px; cursor:pointer; font-size:0.82rem;">▲</button>
-              <button data-action="adjust-exec-box-top" data-param="5" title="เลื่อนกล่อง ผอ. ลง"
-                style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.3); border-radius:6px; padding:3px 6px; cursor:pointer; font-size:0.82rem;">▼</button>
-            </div>
-
-            <span style="color:rgba(255,255,255,0.4);">|</span>
-
-            <!-- ลายเซ็น: ช่าง, หน.กลุ่มงาน, ผอ. -->
+            <!-- ลายเซ็น: ช่างผู้รายงาน -->
             <div style="display:flex; align-items:center; gap:4px;">
               <button data-action="open-signature-modal" data-param="inspector" title="วาดหรืออัปโหลดรูปภาพลายเซ็นของเจ้าหน้าที่ช่าง"
-                style="background:#0284c7; color:white; border:none; border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:600; font-size:0.8rem; display:flex; align-items:center; gap:3px;">
-                ✍️ <span>เซ็นชื่อช่าง</span>
-              </button>
-              <button data-action="open-signature-modal" data-param="chef"
-                title="วาดหรืออัปโหลดรูปภาพลายเซ็นของหัวหน้ากลุ่มงานบริหารทั่วไป"
-                style="background:#4338ca; color:white; border:none; border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:600; font-size:0.8rem; display:flex; align-items:center; gap:3px;">
-                ✍️ <span>เซ็นชื่อ หน.กลุ่มงาน</span>
-              </button>
-              <button data-action="open-signature-modal" data-param="executive" title="วาดหรืออัปโหลดรูปภาพลายเซ็นของผู้อำนวยการ"
-                style="background:#0f766e; color:white; border:none; border-radius:6px; padding:3px 8px; cursor:pointer; font-weight:600; font-size:0.8rem; display:flex; align-items:center; gap:3px;">
-                ✍️ <span>เซ็นชื่อ ผอ.</span>
+                style="background:#0284c7; color:white; border:none; border-radius:6px; padding:3px 10px; cursor:pointer; font-weight:600; font-size:0.8rem; display:flex; align-items:center; gap:4px;">
+                ✍️ <span>เซ็นชื่อผู้รายงาน (ช่าง)</span>
               </button>
             </div>
 

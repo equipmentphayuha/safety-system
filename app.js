@@ -14,6 +14,8 @@ import { getSession, setSession, clearSession, updateSessionActivity, initActivi
 import { initGlobalEvents } from './js/events.js';
 import { initScannerController } from './js/scanner-controller.js';
 import { initRegisterController } from './js/register-controller.js';
+import { renderDynamicChecklist, collectDynamicChecklistResults } from './js/checklist-config.js';
+import { initOfflineSync, enqueueOfflineInspection, updateNetworkStatusUI } from './js/offline-sync.js';
 
 // ลงทะเบียน Service Worker รองรับการทำงาน Offline PWA
 if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
@@ -27,13 +29,33 @@ if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || wi
 // เริ่มต้นระบบผูก Event Delegation ส่วนกลาง (กำจัด inline onclick)
 initGlobalEvents();
 
+// เริ่มต้นระบบ Offline Sync คิวออฟไลน์ & สถานะเครือข่าย
+initOfflineSync({
+  isFirebaseReady,
+  db,
+  storage,
+  addDoc,
+  collection,
+  doc,
+  updateDoc,
+  serverTimestamp,
+  ref,
+  uploadBytes,
+  getDownloadURL,
+  onSyncComplete: () => {
+    updateDashboardUI();
+    renderMapPins();
+    renderHistoryTable();
+  }
+});
+
 // เริ่มต้นระบบ Scanner
 initScannerController({
   onScanned: (id) => handleScanned(id)
 });
 
 // ฟังก์ชันแปลงวันที่ให้เป็นรูปแบบภาษาไทยทางการ เช่น "8 กันยายน พ.ศ. 2569"
-function formatThaiFullDate(dateObj = new Date()) {
+export function formatThaiFullDate(dateObj = new Date()) {
   const thaiMonths = [
     "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
     "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
@@ -43,6 +65,7 @@ function formatThaiFullDate(dateObj = new Date()) {
   const y = dateObj.getFullYear() + 543;
   return `วันที่ ${d} ${m} พ.ศ. ${y}`;
 }
+window.formatThaiFullDate = formatThaiFullDate;
 
 // ล้างค่าเก่าใน localStorage ที่อาจมีตำแหน่งติดมาในวงเล็บโดยอัตโนมัติ
 try {
@@ -114,12 +137,8 @@ Object.defineProperty(window, 'inspectionLogs', {
   set: (val) => { inspectionLogs = val; },
   configurable: true
 });
-function renderHistoryTable() {
-  if (typeof window.renderHistoryTable === "function") {
-    window.renderHistoryTable();
-  }
-}
-window.renderHistoryTable = function () {
+
+export function renderHistoryTable() {
   const tbody = document.getElementById('history-rows');
   if (!tbody) return;
   tbody.innerHTML = "";
@@ -351,7 +370,7 @@ window.logoutUser = async function () {
 // Guard: เช็คก่อนทำ action ที่ต้องการ login
 // ใช้งาน: if (!requireLogin('บันทึกข้อมูล')) return;
 // ==========================================
-function requireLogin(actionName = 'ดำเนินการนี้') {
+export function requireLogin(actionName = 'ดำเนินการนี้') {
   const session = getSession();
   if (session && session.officer) return true; // login อยู่แล้ว ✅
 
@@ -369,6 +388,7 @@ function requireLogin(actionName = 'ดำเนินการนี้') {
   }
   return false;
 }
+window.requireLogin = requireLogin;
 
 // ==========================================
 // 1. การสลับแท็บเมนู
@@ -447,7 +467,7 @@ function deduplicateAssets(list) {
 
 // 2. จัดการข้อมูลอุปกรณ์ (Assets Initialization)
 // ==========================================
-async function initAssets() {
+export async function initAssets() {
   const localSaved = storageService.get('pyh_assets_data');
   if (localSaved) {
     try {
@@ -613,7 +633,7 @@ function checkUrlScanParam() {
 }
 
 // อัปเดตข้อมูลสรุป Dashboard & KPIs
-function updateDashboardUI() {
+export function updateDashboardUI() {
   const total = assetsList.length;
   const ready = assetsList.filter(a => a.status === 'READY').length;
   const repairing = assetsList.filter(a => a.status === 'REPAIRING').length;
@@ -1064,7 +1084,7 @@ window.submitQuickAddAsset = async function () {
   showMapToast(`✅ บันทึกอุปกรณ์ [${assetId}] บนผังเรียบร้อยแล้ว!`);
 };
 
-function renderMapPins() {
+export function renderMapPins() {
   if (!map) return;
   markers.forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
   markers = [];
@@ -1327,6 +1347,116 @@ function renderMapPins() {
 
   // อัปเดตการ์ดลำดับจุดติดตั้งด้านล่างแผนที่ (Dashboard Asset Quick Chips)
   renderDashboardAssetChips();
+  renderTechRoutingList();
+}
+
+let _currentDashboardView = 'map'; // 'map' | 'list'
+
+window.switchMapViewMode = function (mode) {
+  _currentDashboardView = mode;
+  const btnMap = document.getElementById('btn-view-map');
+  const btnList = document.getElementById('btn-view-list');
+  const mapEl = document.getElementById('floor-map');
+  const hintEl = document.getElementById('map-legend-hint');
+  const chipsEl = document.getElementById('dashboard-asset-quicklist-container');
+  const listEl = document.getElementById('tech-routing-list');
+
+  if (mode === 'list') {
+    if (btnMap) { btnMap.style.background = 'transparent'; btnMap.style.color = '#475569'; }
+    if (btnList) { btnList.style.background = '#00695c'; btnList.style.color = '#fff'; }
+    if (mapEl) mapEl.style.display = 'none';
+    if (hintEl) hintEl.style.display = 'none';
+    if (chipsEl) chipsEl.style.display = 'none';
+    if (listEl) {
+      listEl.style.display = 'block';
+      renderTechRoutingList();
+    }
+  } else {
+    if (btnMap) { btnMap.style.background = '#00695c'; btnMap.style.color = '#fff'; }
+    if (btnList) { btnList.style.background = 'transparent'; btnList.style.color = '#475569'; }
+    if (mapEl) {
+      mapEl.style.display = 'block';
+      if (map) map.invalidateSize();
+    }
+    if (hintEl) hintEl.style.display = 'block';
+    if (chipsEl) chipsEl.style.display = 'block';
+    if (listEl) listEl.style.display = 'none';
+  }
+};
+
+function renderTechRoutingList() {
+  const listEl = document.getElementById('tech-routing-list');
+  if (!listEl) return;
+
+  const currentAssets = currentMapMode === 'campus'
+    ? assetsList.filter(a => a.campusCoord)
+    : assetsList.filter(a => a.buildingId === currentMapMode);
+
+  if (currentAssets.length === 0) {
+    listEl.innerHTML = `
+      <div style="text-align:center; padding:32px; color:#94a3b8; font-size:0.9rem; background:#f8fafc; border-radius:10px; border:1px dashed #cbd5e1;">
+        📭 ยังไม่มีจุดตรวจเช็กที่บันทึกพิกัดในโซนนี้
+      </div>`;
+    return;
+  }
+
+  const bldgName = floorConfigs[currentMapMode]?.name || 'ภาพรวมโรงพยาบาล';
+  let html = `
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="font-size:0.86rem; font-weight:700; color:#0f766e;">
+        📋 เส้นทางเดินตรวจแนะนำ: ${bldgName} (${currentAssets.length} จุด)
+      </div>
+      <div style="font-size:0.75rem; color:#64748b;">
+        เรียงลำดับจากจุดใกล้เคียง
+      </div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+  `;
+
+  currentAssets.forEach((item, idx) => {
+    const isReady = item.status === 'READY';
+    const statusBadge = isReady 
+      ? '<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; font-size:0.72rem; font-weight:700; padding:2px 8px; border-radius:12px;">✅ ปกติ</span>'
+      : '<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:0.72rem; font-weight:700; padding:2px 8px; border-radius:12px;">⚠️ ชำรุด/รอตรวจ</span>';
+    
+    const lastCheckedStr = item.lastChecked 
+      ? new Date(item.lastChecked).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
+      : 'ยังไม่เคยตรวจ';
+
+    html += `
+      <div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="background:#0f766e; color:#fff; font-size:0.78rem; font-weight:800; padding:3px 8px; border-radius:6px; min-width:24px; text-align:center;">
+            #${idx + 1}
+          </span>
+          <div>
+            <div style="font-size:0.9rem; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:6px;">
+              ${item.assetId} ${statusBadge}
+            </div>
+            <div style="font-size:0.78rem; color:#475569; margin-top:2px;">
+              ${item.type || ''} • 📍 ${item.location || '-'}
+            </div>
+            <div style="font-size:0.72rem; color:#94a3b8; margin-top:1px;">
+              ตรวจล่าสุด: ${lastCheckedStr} ${item.lastInspector ? 'โดย ' + item.lastInspector : ''}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button type="button" class="btn-sm" onclick="showAssetHistoryModal('${item.assetId}')"
+            style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; border-radius:6px; padding:5px 10px; font-size:0.78rem; cursor:pointer;">
+            📜 ดูประวัติ
+          </button>
+          <button type="button" class="btn-sm" onclick="openInspectionForm('${item.assetId}')"
+            style="background:#00695c; color:#fff; border:none; border-radius:6px; padding:5px 12px; font-size:0.78rem; font-weight:700; cursor:pointer;">
+            📝 ตรวจเช็ก
+          </button>
+        </div>
+      </div>
+    `;
+  });
+
+  html += '</div>';
+  listEl.innerHTML = html;
 }
 
 // ฟังก์ชันแสดงการ์ดลำดับอุปกรณ์ประจำโซน/อาคารปัจจุบัน
@@ -1646,7 +1776,7 @@ window.stopScanner = function () {
 };
 
 // ==========================================
-// 5. จัดการแบบฟอร์มตรวจสอบ (Checklist FE vs EM)
+// 5. จัดการแบบฟอร์มตรวจสอบ (Dynamic Checklist)
 // ==========================================
 // เปิดหน้าแบบฟอร์มตรวจเช็ก (สำหรับเจ้าหน้าที่ที่ผ่านการ Login แล้ว)
 window.openInspectionForm = function (assetId) {
@@ -1673,17 +1803,8 @@ window.openInspectionForm = function (assetId) {
     }
   }
 
-  const feFields = document.getElementById('fe-checklist-fields');
-  const emFields = document.getElementById('em-checklist-fields');
-
-  // ตรวจสอบชนิดอุปกรณ์ว่าขึ้นต้นด้วย PYH-FE- หรือ PYH-EM-
-  if (asset.assetId.startsWith('PYH-FE') || asset.type.includes('ถังดับเพลิง')) {
-    feFields.classList.remove('hidden');
-    emFields.classList.add('hidden');
-  } else {
-    feFields.classList.add('hidden');
-    emFields.classList.remove('hidden');
-  }
+  // เรนเดอร์ฟอร์มตรวจเช็กตามประเภทอุปกรณ์แบบ Dynamic Checklist
+  renderDynamicChecklist(asset, 'dynamic-checklist-container');
 
   document.getElementById('inspection-form-card').classList.remove('hidden');
   document.getElementById('inspection-form-card').scrollIntoView({ behavior: 'smooth' });
@@ -1711,7 +1832,7 @@ window.handleScanned = function (rawInput) {
   }
 };
 
-// บันทึกผลการตรวจเช็ก
+// บันทึกผลการตรวจเช็ก (รองรับทั้ง Offline Queue และ Online Cloud Firestore)
 const inspectForm = document.getElementById('inspection-form');
 if (inspectForm) {
   inspectForm.addEventListener('submit', async (e) => {
@@ -1726,34 +1847,23 @@ if (inspectForm) {
       const assetIndex = assetsList.findIndex(a => a.assetId === assetId);
       if (assetIndex === -1) throw new Error("ไม่พบข้อมูลอุปกรณ์");
 
-      const isFE = assetId.startsWith('PYH-FE');
-      let isPass = true;
-      let checkDetails = {};
-
-      if (isFE) {
-        const body = document.getElementById('fe-body').value;
-        const pressure = document.getElementById('fe-pressure').value;
-        const access = document.getElementById('fe-access').value;
-        isPass = (body === 'PASS' && pressure === 'PASS' && access === 'PASS');
-        checkDetails = { body, pressure, access };
-      } else {
-        const light = document.getElementById('em-light').value;
-        const test = document.getElementById('em-test').value;
-        const plug = document.getElementById('em-plug').value;
-        isPass = (light === 'PASS' && test === 'PASS' && plug === 'PASS');
-        checkDetails = { light, test, plug };
-      }
+      // รวบรวมผลการตรวจจากฟอร์ม Dynamic Checklist
+      const checkResult = collectDynamicChecklistResults('dynamic-checklist-container');
+      const isPass = checkResult.isPass;
+      const checkDetails = checkResult.details;
+      const urgency = checkResult.urgency || (isPass ? 'NORMAL' : 'MEDIUM');
 
       const notes = document.getElementById('inspect-notes').value || "-";
       const photoFile = document.getElementById('inspect-photo').files[0];
       let photoURL = "";
 
-      // จัดการภาพถ่าย: บีบอัดภาพก่อนเพื่อป้องกันไฟล์ใหญ่ และอัปโหลดขึ้น Firebase Cloud Storage
+      // จัดการภาพถ่าย: บีบอัดภาพก่อนเพื่อป้องกันไฟล์ใหญ่
+      let optimizedFile = null;
       if (photoFile) {
         btn.innerText = "กำลังประมวลผลรูปภาพ...";
-        const optimizedFile = await compressImageFile(photoFile, 1024, 0.75);
+        optimizedFile = await compressImageFile(photoFile, 1024, 0.75);
 
-        if (isFirebaseReady() && storage) {
+        if (navigator.onLine && isFirebaseReady() && storage) {
           try {
             btn.innerText = "กำลังอัปโหลดรูปภาพขึ้น Cloud Storage...";
             const storageRef = ref(storage, `inspections/${assetId}_${Date.now()}.jpg`);
@@ -1768,7 +1878,7 @@ if (inspectForm) {
         }
       }
 
-      // ดึงชื่อช่างที่กรอกจากแบบฟอร์ม (ใช้เฉพาะชื่อ-นามสกุล ไม่นำตำแหน่งมาต่อท้ายในวงเล็บ)
+      // ดึงชื่อช่างที่กรอกจากแบบฟอร์ม
       const inspectorName = getCleanName(document.getElementById('inspect-inspector-name')?.value.trim() || 'นายสุวิทย์ พวงสมบัติ');
       const inspectorRole = document.getElementById('inspect-inspector-role')?.value.trim() || 'นายช่างเทคนิค';
       currentOfficer = inspectorName;
@@ -1780,6 +1890,7 @@ if (inspectForm) {
         assetId: assetId,
         inspector: inspectorName,
         status: isPass ? "READY" : "ISSUE",
+        urgency: urgency,
         details: checkDetails,
         notes: notes,
         photoURL: photoURL,
@@ -1787,33 +1898,68 @@ if (inspectForm) {
         timestampISO: now.toISOString()
       };
 
-      // 1. เพิ่มเข้า Inspection Logs
-      if (isFirebaseReady() && db) {
-        await addDoc(collection(db, "inspection_logs"), {
-          ...logEntry,
-          timestamp: serverTimestamp()
-        });
-      }
+      // 1. เพิ่มเข้า Inspection Logs ในเครื่องทันที
       inspectionLogs.unshift(logEntry);
       storageService.set('pyh_inspection_logs', inspectionLogs);
 
-      // 2. อัปเดตสถานะใน Assets List
+      // 2. อัปเดตสถานะใน Assets List ในเครื่องทันที
       assetsList[assetIndex].status = isPass ? "READY" : "ISSUE";
       assetsList[assetIndex].lastChecked = now.toISOString();
       assetsList[assetIndex].lastInspector = inspectorName;
       assetsList[assetIndex].lastPhoto = photoURL;
+      assetsList[assetIndex].urgency = urgency;
       storageService.set('pyh_assets_data', assetsList);
 
-      if (isFirebaseReady() && db && assetsList[assetIndex].firestoreId) {
-        await updateDoc(doc(db, "assets", assetsList[assetIndex].firestoreId), {
-          status: isPass ? "READY" : "ISSUE",
-          lastChecked: serverTimestamp(),
-          lastInspector: inspectorName,
-          lastPhoto: photoURL
+      // 3. จัดการบันทึกขึ้นคลาวด์ หรือเข้าคิวออฟไลน์ (Offline-First)
+      const isOnline = navigator.onLine && isFirebaseReady() && db;
+      if (isOnline) {
+        try {
+          await addDoc(collection(db, "inspection_logs"), {
+            ...logEntry,
+            timestamp: serverTimestamp()
+          });
+
+          if (assetsList[assetIndex].firestoreId) {
+            await updateDoc(doc(db, "assets", assetsList[assetIndex].firestoreId), {
+              status: isPass ? "READY" : "ISSUE",
+              lastChecked: serverTimestamp(),
+              lastInspector: inspectorName,
+              lastPhoto: photoURL,
+              urgency: urgency
+            });
+          }
+        } catch (cloudErr) {
+          console.warn("Cloud save failed, queueing offline task:", cloudErr);
+          enqueueOfflineInspection({
+            logEntry,
+            assetFirestoreId: assetsList[assetIndex].firestoreId,
+            assetUpdate: {
+              status: isPass ? "READY" : "ISSUE",
+              lastCheckedISO: now.toISOString(),
+              lastInspector: inspectorName,
+              lastPhoto: photoURL,
+              urgency: urgency
+            }
+          });
+        }
+      } else {
+        // ออฟไลน์อยู่ -> บันทึกลง Offline Queue
+        enqueueOfflineInspection({
+          logEntry,
+          assetFirestoreId: assetsList[assetIndex].firestoreId,
+          assetUpdate: {
+            status: isPass ? "READY" : "ISSUE",
+            lastCheckedISO: now.toISOString(),
+            lastInspector: inspectorName,
+            lastPhoto: photoURL,
+            urgency: urgency
+          }
         });
       }
 
-      alert(isPass ? "✅ บันทึกผลการตรวจเช็กเรียบร้อย อุปกรณ์พร้อมใช้งาน" : "⚠️ อุปกรณ์ชำรุด บันทึกแจ้งซ่อมเข้าสู่ระบบเรียบร้อย");
+      const statusMsg = isPass ? "✅ บันทึกผลการตรวจเช็กเรียบร้อย อุปกรณ์พร้อมใช้งาน" : "⚠️ อุปกรณ์ชำรุด บันทึกแจ้งซ่อมเข้าสู่ระบบเรียบร้อย";
+      const offlineMsg = !isOnline ? "\n(💾 บันทึกในเครื่องแบบออฟไลน์แล้ว ระบบจะซิงก์ขึ้นคลาวด์อัตโนมัติเมื่อต่อเน็ต)" : "";
+      alert(statusMsg + offlineMsg);
 
       inspectForm.reset();
       document.getElementById('inspection-form-card').classList.add('hidden');
@@ -2587,34 +2733,160 @@ window.closeQRModal = function () {
   _qrModalAsset = null;
 };
 
-window.downloadQR = function () {
-  const canvas = document.querySelector('#qr-modal-canvas canvas');
+window.downloadQR = async function () {
+  if (!_qrModalAsset) return;
+  const cardEl = document.getElementById('qr-tag-card-preview');
+  
+  // หากมี html2canvas ให้จับภาพทั้งป้ายสติ๊กเกอร์ (Sticker Tag Card)
+  if (typeof window.html2canvas === 'function' && cardEl) {
+    try {
+      const origCanvasInTag = cardEl.querySelector('#qr-modal-canvas canvas');
+      const origImgInTag = cardEl.querySelector('#qr-modal-canvas img');
+      // ซ่อน duplicate canvas ให้เหลือเฉพาะรูป img เพื่อความคมชัด
+      if (origCanvasInTag && origImgInTag) {
+        origCanvasInTag.style.display = 'none';
+      }
+      const renderedCanvas = await window.html2canvas(cardEl, {
+        scale: 2, // ความคมชัดสูง 2 เท่า
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+      if (origCanvasInTag && origImgInTag) {
+        origCanvasInTag.style.display = '';
+      }
+      const link = document.createElement('a');
+      link.download = `TAG-${_qrModalAsset.assetId}.png`;
+      link.href = renderedCanvas.toDataURL('image/png');
+      link.click();
+      return;
+    } catch (err) {
+      console.warn('html2canvas capture failed, fallback to raw QR code image', err);
+    }
+  }
+
+  // Fallback กรณีไม่มี html2canvas
+  const canvas = document.querySelector('#qr-modal-canvas canvas') || document.querySelector('#qr-modal-canvas img');
   if (!canvas) return;
   const link = document.createElement('a');
-  link.download = `QR-${_qrModalAsset?.assetId || 'asset'}.png`;
-  link.href = canvas.toDataURL('image/png');
+  link.download = `QR-${_qrModalAsset.assetId}.png`;
+  link.href = (canvas.tagName.toLowerCase() === 'img') ? canvas.src : canvas.toDataURL('image/png');
   link.click();
 };
 
 window.printQRModal = function () {
   if (!requireLogin('สั่งพิมพ์ QR Code')) return;
   const canvas = document.querySelector('#qr-modal-canvas canvas');
-  if (!canvas || !_qrModalAsset) return;
+  const imgEl = document.querySelector('#qr-modal-canvas img');
+  if ((!canvas && !imgEl) || !_qrModalAsset) return;
   const a = _qrModalAsset;
+  const qrDataUrl = canvas ? canvas.toDataURL() : (imgEl ? imgEl.src : '');
+
   const win = window.open('', '_blank');
   win.document.write(`
-    <html><head><title>QR - ${a.assetId}</title>
+    <!DOCTYPE html>
+    <html><head><meta charset="UTF-8"><title>SAFETY TAG - ${a.assetId}</title>
     <style>
-      body { font-family: 'Sarabun', sans-serif; text-align:center; padding:30px; }
-      img { width:200px; height:200px; }
-      h2 { margin:10px 0 4px; font-size:1.1rem; }
-      p  { margin:2px 0; font-size:0.85rem; color:#444; }
+      @page {
+        size: auto;
+        margin: 4mm;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 4px;
+        font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: flex;
+        justify-content: flex-start;
+        align-items: flex-start;
+        background: #fff;
+      }
+      .sticker-tag {
+        width: 80mm;
+        border: 2px solid #0f172a;
+        border-radius: 6px;
+        padding: 8px 10px;
+        text-align: center;
+        background: #fff;
+        page-break-inside: avoid;
+      }
+      .tag-header {
+        border-bottom: 2px solid #004d40;
+        padding-bottom: 4px;
+        margin-bottom: 6px;
+      }
+      .tag-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #004d40;
+        line-height: 1.2;
+      }
+      .tag-sub {
+        font-size: 10px;
+        color: #475569;
+        font-weight: 600;
+      }
+      .tag-qr {
+        margin: 6px auto;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .tag-qr img {
+        width: 130px;
+        height: 130px;
+        display: block;
+      }
+      .tag-id {
+        font-size: 15px;
+        font-weight: 800;
+        color: #0f172a;
+        margin: 4px 0 2px;
+        letter-spacing: 0.5px;
+      }
+      .tag-type {
+        font-size: 11px;
+        font-weight: 600;
+        color: #004d40;
+        margin-bottom: 2px;
+      }
+      .tag-loc {
+        font-size: 10px;
+        color: #334155;
+        line-height: 1.3;
+      }
+      .tag-footer {
+        border-top: 1px dashed #94a3b8;
+        margin-top: 6px;
+        padding-top: 4px;
+        font-size: 9px;
+        color: #64748b;
+      }
+      @media print {
+        body { padding: 0; }
+        .sticker-tag { box-shadow: none; }
+      }
     </style></head><body>
-    <img src="${canvas.toDataURL()}">
-    <h2>${a.assetId}</h2>
-    <p>${a.type || ''}</p>
-    <p>${a.building || ''} ${a.location ? '— ' + a.location : ''}</p>
-    <script>window.onload=()=>{ window.print(); window.close(); }<\/script>
+      <div class="sticker-tag">
+        <div class="tag-header">
+          <div class="tag-title">🏥 โรงพยาบาลพยุหะคีรี</div>
+          <div class="tag-sub">FIRE & SAFETY INSPECTION TAG</div>
+        </div>
+        <div class="tag-qr">
+          <img src="${qrDataUrl}">
+        </div>
+        <div class="tag-id">${a.assetId}</div>
+        <div class="tag-type">${a.type || 'อุปกรณ์ความปลอดภัย'}</div>
+        <div class="tag-loc">${a.building || ''} ${a.location ? '— ' + a.location : ''}</div>
+        <div class="tag-footer">📷 สแกนผ่าน LINE / กล้องมือถือ เพื่อตรวจ & ดูประวัติ</div>
+      </div>
+      <script>
+        window.onload = () => {
+          setTimeout(() => {
+            window.print();
+            window.close();
+          }, 300);
+        };
+      <\/script>
     </body></html>`);
   win.document.close();
 };
@@ -2633,34 +2905,131 @@ window.printAllQR = function () {
   const win = window.open('', '_blank');
   const items = filtered.map(a => `
     <div class="qr-item">
-      <div id="qr-${a.assetId.replace(/[^a-zA-Z0-9]/g, '-')}"></div>
-      <b>${a.assetId}</b><br>
-      <span>${a.type || ''}</span><br>
-      <span>${a.building || ''} ${a.location ? '— ' + a.location : ''}</span>
+      <div class="tag-header">
+        <div class="tag-title">🏥 รพ.พยุหะคีรี</div>
+        <div class="tag-sub">SAFETY TAG</div>
+      </div>
+      <div class="qr-canvas-holder" id="qr-${a.assetId.replace(/[^a-zA-Z0-9]/g, '-')}"></div>
+      <b class="tag-id">${a.assetId}</b>
+      <div class="tag-type">${a.type || ''}</div>
+      <div class="tag-loc">${a.building || ''} ${a.location ? '— ' + a.location : ''}</div>
+      <div class="tag-footer">📷 สแกนผ่าน LINE / กล้อง เพื่อตรวจ</div>
     </div>`).join('');
 
   win.document.write(`
-    <html><head><title>QR ทั้งหมด</title>
+    <!DOCTYPE html>
+    <html><head><meta charset="UTF-8"><title>SAFETY TAGS ทั้งหมด (${filtered.length} รายการ)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
     <style>
-      body { font-family: 'Sarabun', sans-serif; }
-      .grid { display:flex; flex-wrap:wrap; gap:8px; padding:16px; }
-      .qr-item { border:1px solid #ccc; border-radius:6px; padding:10px; text-align:center;
-                 width:160px; font-size:0.75rem; break-inside:avoid; }
-      .qr-item b { font-size:0.85rem; display:block; margin:6px 0 2px; }
-      @media print { body { margin:0; } }
+      @page {
+        size: A4;
+        margin: 8mm;
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 0;
+        padding: 4px;
+        background: #fff;
+      }
+      .grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-start;
+      }
+      .qr-item {
+        border: 1.5px solid #0f172a;
+        border-radius: 6px;
+        padding: 6px;
+        text-align: center;
+        width: 175px;
+        font-size: 0.72rem;
+        break-inside: avoid;
+        background: #fff;
+      }
+      .tag-header {
+        border-bottom: 1.5px solid #004d40;
+        padding-bottom: 2px;
+        margin-bottom: 4px;
+      }
+      .tag-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: #004d40;
+        line-height: 1.2;
+      }
+      .tag-sub {
+        font-size: 8px;
+        color: #64748b;
+        font-weight: 600;
+      }
+      /* ซ่อน Canvas ที่ duplicate จาก qrcodejs ให้แสดงเฉพาะภาพ img */
+      .qr-canvas-holder canvas {
+        display: none !important;
+      }
+      .qr-canvas-holder img {
+        margin: 4px auto !important;
+        display: block !important;
+        width: 100px !important;
+        height: 100px !important;
+      }
+      .tag-id {
+        font-size: 12px;
+        font-weight: 800;
+        display: block;
+        margin: 4px 0 1px;
+        color: #0f172a;
+      }
+      .tag-type {
+        font-size: 9.5px;
+        font-weight: 600;
+        color: #004d40;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tag-loc {
+        font-size: 8.5px;
+        color: #475569;
+        line-height: 1.2;
+        height: 22px;
+        overflow: hidden;
+      }
+      .tag-footer {
+        border-top: 1px dashed #cbd5e1;
+        margin-top: 4px;
+        padding-top: 3px;
+        font-size: 7.5px;
+        color: #64748b;
+      }
+      @media print {
+        body { margin: 0; padding: 0; }
+        .grid { gap: 6px; }
+      }
     </style></head>
-    <body><div class="grid">${items}</div>
-    <script>
-      const assets = ${JSON.stringify(filtered)};
-      const baseUrl = ${JSON.stringify(getAssetDirectUrl('__ID__'))};
-      assets.forEach(a => {
-        const el = document.getElementById('qr-' + a.assetId.replace(/[^a-zA-Z0-9]/g,'-'));
-        const directUrl = baseUrl.replace('__ID__', encodeURIComponent(a.assetId));
-        if (el) new QRCode(el, { text: directUrl, width: 120, height: 120 });
-      });
-      setTimeout(() => window.print(), 1200);
-    <\/script></body></html>`);
+    <body>
+      <div class="grid">${items}</div>
+      <script>
+        const assets = ${JSON.stringify(filtered)};
+        const baseUrl = ${JSON.stringify(getAssetDirectUrl('__ID__'))};
+        assets.forEach(a => {
+          const el = document.getElementById('qr-' + a.assetId.replace(/[^a-zA-Z0-9]/g,'-'));
+          const directUrl = baseUrl.replace('__ID__', encodeURIComponent(a.assetId));
+          if (el) {
+            new QRCode(el, {
+              text: directUrl,
+              width: 100,
+              height: 100,
+              correctLevel: QRCode.CorrectLevel.M
+            });
+          }
+        });
+        setTimeout(() => {
+          window.print();
+        }, 1200);
+      <\/script>
+    </body></html>`);
   win.document.close();
 };
 
@@ -3566,10 +3935,19 @@ window.addEventListener('DOMContentLoaded', () => {
 // ==========================================
 import { initReportModule } from './js/report-module.js';
 
+window.initAssets = initAssets;
+window.updateDashboardUI = updateDashboardUI;
+window.renderMapPins = renderMapPins;
+window.renderHistoryTable = renderHistoryTable;
+
 initReportModule({
   getAssetsList: () => assetsList,
   getCurrentOfficer: () => currentOfficer,
-  getCurrentUserRole: () => currentUserRole
+  getCurrentUserRole: () => currentUserRole,
+  updateDashboardUI,
+  renderMapPins,
+  renderHistoryTable,
+  initAssets
 });
 
 // Sync ตัวแปรไปยัง window เพื่อความเข้ากันได้

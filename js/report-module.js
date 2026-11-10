@@ -4,17 +4,63 @@ import { storageService } from './storage-service.js';
 
 import {
   db, storage, auth, isFirebaseReady,
-  doc, setDoc, getDoc, collection, getDocs, updateDoc,
+  doc, setDoc, getDoc, collection, getDocs, updateDoc, addDoc,
   ref, uploadBytes, getDownloadURL
 } from '../firebase-config.js';
 import { reportBuildingMetadata } from './report-constants.js';
 import { getCleanName, cleanAssetType } from './constants.js';
 
+// Fallback helpers for standalone module access
+function formatThaiFullDate(dateObj = new Date()) {
+  if (typeof window.formatThaiFullDate === 'function') {
+    return window.formatThaiFullDate(dateObj);
+  }
+  const thaiMonths = [
+    "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+  ];
+  const d = dateObj.getDate();
+  const m = thaiMonths[dateObj.getMonth()];
+  const y = dateObj.getFullYear() + 543;
+  return `วันที่ ${d} ${m} พ.ศ. ${y}`;
+}
+
+function requireLogin(actionName = 'ดำเนินการนี้') {
+  if (typeof window.requireLogin === 'function') {
+    return window.requireLogin(actionName);
+  }
+  return true;
+}
+
 let _appContext = {
   getAssetsList: () => (window.assetsList || []),
   getCurrentOfficer: () => (window.currentOfficer || ''),
-  getCurrentUserRole: () => (window.currentUserRole || 'guest')
+  getCurrentUserRole: () => (window.currentUserRole || 'guest'),
+  updateDashboardUI: () => (typeof window.updateDashboardUI === 'function' ? window.updateDashboardUI() : null),
+  renderMapPins: () => (typeof window.renderMapPins === 'function' ? window.renderMapPins() : null),
+  renderHistoryTable: () => (typeof window.renderHistoryTable === 'function' ? window.renderHistoryTable() : null),
+  initAssets: () => (typeof window.initAssets === 'function' ? window.initAssets() : null)
 };
+
+function updateDashboardUI() {
+  if (typeof _appContext.updateDashboardUI === 'function') _appContext.updateDashboardUI();
+  else if (typeof window.updateDashboardUI === 'function') window.updateDashboardUI();
+}
+
+function renderMapPins() {
+  if (typeof _appContext.renderMapPins === 'function') _appContext.renderMapPins();
+  else if (typeof window.renderMapPins === 'function') window.renderMapPins();
+}
+
+function renderHistoryTable() {
+  if (typeof _appContext.renderHistoryTable === 'function') _appContext.renderHistoryTable();
+  else if (typeof window.renderHistoryTable === 'function') window.renderHistoryTable();
+}
+
+function initAssets() {
+  if (typeof _appContext.initAssets === 'function') _appContext.initAssets();
+  else if (typeof window.initAssets === 'function') window.initAssets();
+}
 
 export function initReportModule(context) {
   if (context) {
@@ -30,26 +76,26 @@ const buildingMetadata = reportBuildingMetadata;
 
 // สถานะการจัดรูปแบบรายงานและเอกสาร
 let currentReportFormat = 'memo'; // 'memo' = บันทึกข้อความราชการ, 'detailed' = รายงานสถิติละเอียด
-let memoLineSpacing = 1.45; // ระยะห่างบรรทัด
-// ระยะขอบ 4 ทิศทาง (มาตรฐานงานสารบรรณไทย: บน 2.0 ซม., ซ้าย 2.5 ซม., ขวา 2.0 ซม., ล่าง 2.0 ซม.)
+let memoLineSpacing = 1.25; // ระยะห่างบรรทัด
+// ระยะขอบ 4 ทิศทางตามระเบียบงานสารบรรณ (แบบที่ ๒ ท้ายระเบียบ): บน 1.5 ซม., ซ้าย (กั้นหน้า) 3.0 ซม., ขวา (กั้นหลัง) 2.0 ซม., ล่าง 2.0 ซม.
 let memoMargins = {
-  top: 2.0,
+  top: 1.5,
   bottom: 2.0,
-  left: 2.5,
+  left: 3.0,
   right: 2.0
 };
-let memoMarginCm = 2.5; // fallback compat
+let memoMarginCm = 3.0; // fallback compat
 let memoExecBoxPosition = 'left'; // 'left' = ซ้ายล่าง, 'right' = ขวาล่าง
 let memoExecBoxOffset = { x: 0, y: 0 }; // ลากอิสระด้วยเมาส์
 let memoExecBoxMarginTop = 16; // px
 let memoChefBoxOffset = { x: 0, y: 0 }; // ลากอิสระสำหรับกล่องหัวหน้ากลุ่มงาน
 
-// การปรับขนาดตัวอักษรแยกเฉพาะส่วน (Granular Font Sizes)
+// การปรับขนาดตัวอักษรแยกเฉพาะส่วน (ตามระเบียบ: บันทึกข้อความ 29pt ตัวหนา, ส่วนราชการ/ที่/วันที่/เรื่อง 20pt ตัวหนา, คำขึ้นต้น/เนื้อหา 16pt)
 let memoFontConfig = {
-  title: 29,  // ข้อความ "บันทึกข้อความ"
-  header: 16, // หัวหนังสือ: ส่วนราชการ, ที่, วันที่, เรื่อง, เรียน
-  body: 16,   // เนื้อหา: ความเป็นมา, ข้อพิจารณา, ข้อเสนอ
-  sign: 15    // ส่วนลงนาม: ผู้รายงาน, กล่องเสนอ ผอ., คำสั่งการ ผอ.
+  title: 29,  // ข้อความ "บันทึกข้อความ" ตัวหนา ขนาด 29 พอยท์
+  header: 20, // หัวหนังสือ: ส่วนราชการ, ที่, วันที่, เรื่อง (ตัวหนา ขนาด 20 พอยท์)
+  body: 16,   // คำขึ้นต้นและเนื้อหา (ขนาด 16 พอยท์)
+  sign: 16    // ส่วนลงนามและตำแหน่ง (ขนาด 16 พอยท์)
 };
 
 // ฟังก์ชันปรับขนาดฟอนต์แบบตรงตามค่าตัวเลข (พิมพ์เลขได้เหมือน MS Word)
@@ -692,15 +738,15 @@ window.adjustMemoSpacing = function (delta) {
 };
 
 window.resetMemoContent = function () {
-  if (confirm("ต้องการคืนค่าข้อความและการจัดหน้าเริ่มต้นใช่ไหม?")) {
+  if (confirm("ต้องการคืนค่าข้อความและการจัดหน้าตามระเบียบงานสารบรรณเริ่มต้นใช่ไหม?")) {
     storageService.remove('pyh_custom_memo_data');
     storageService.remove('pyh_memo_exec_box_offset');
     storageService.remove('pyh_memo_chef_box_offset');
     storageService.remove('pyh_memo_margins');
     storageService.remove('pyh_memo_fonts');
-    memoFontConfig = { title: 29, header: 16, body: 16, sign: 15 };
-    memoMargins = { top: 2.0, bottom: 2.0, left: 2.5, right: 2.0 };
-    memoLineSpacing = 1.45;
+    memoFontConfig = { title: 29, header: 20, body: 16, sign: 16 };
+    memoMargins = { top: 1.5, bottom: 2.0, left: 3.0, right: 2.0 };
+    memoLineSpacing = 1.25;
     memoExecBoxOffset = { x: 0, y: 0 };
     memoChefBoxOffset = { x: 0, y: 0 };
     memoExecBoxPosition = 'left';
@@ -721,6 +767,8 @@ window.saveMemoEdits = function () {
     docDate: document.getElementById('memo-doc-date')?.innerText || '',
     subject: document.getElementById('memo-subject')?.innerText || '',
     to: document.getElementById('memo-to')?.innerText || '',
+    authorName: document.getElementById('report-display-tech-name')?.innerText || '',
+    authorPos: document.getElementById('report-display-tech-pos')?.innerText || '',
     bgText: document.getElementById('memo-para-bg')?.innerText || '',
     considerText: document.getElementById('memo-para-consider')?.innerText || '',
     proposeText: document.getElementById('memo-para-propose')?.innerText || '',
@@ -756,23 +804,6 @@ window.renderOfficialMemo = function () {
   const feTotal = (_appContext.getAssetsList()).filter(a => a.assetId.startsWith('PYH-FE') || a.type.includes('ถังดับเพลิง')).length;
   const emTotal = (_appContext.getAssetsList()).filter(a => a.assetId.startsWith('PYH-EM') || a.type.includes('ไฟฉุกเฉิน')).length;
 
-  // ผู้จัดทำและผู้บริหาร
-  // ผู้จัดทำ, ผู้ตรวจสอบ (หัวหน้ากลุ่มงาน), และผู้บริหาร
-  const authorName = getCleanName((_appContext.getCurrentOfficer())) || "นายสุวิทย์ พวงสมบัติ";
-  const authorPos = "นายช่างเทคนิค";
-  const chefReviewerName = getCleanName(document.getElementById('report-reviewer-name')?.value.trim() || "นายคมสัน ศรีสิงห์");
-  const chefReviewerPos1 = "นักเทคนิคการแพทย์ปฏิบัติการ รักษาการในตำแหน่ง";
-  const chefReviewerPos2 = "หัวหน้ากลุ่มงานบริหารทั่วไป";
-  const approverName = "นางสาวศิริพรรณ ชมพูภู่";
-  const approverPos = "ผู้อำนวยการโรงพยาบาลพยุหะคีรี";
-
-  // วันที่ปัจจุบันแบบไทย
-  const now = new Date();
-  const thaiDay = toThaiNumerals(now.getDate());
-  const thaiMonth = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'][now.getMonth()];
-  const thaiYear = toThaiNumerals(now.getFullYear() + 543);
-  const thaiDateFormatted = `${thaiDay}   ${thaiMonth}  ${thaiYear}`;
-
   // ดึงข้อมูลที่เคยแก้ไขไว้ (ถ้ามี)
   let saved = null;
   try {
@@ -788,10 +819,32 @@ window.renderOfficialMemo = function () {
     if (rawFonts) memoFontConfig = Object.assign(memoFontConfig, JSON.parse(rawFonts));
   } catch(e) {}
 
-  const deptVal = saved?.dept || "กลุ่มงานบริหารทั่วไปและงานซ่อมบำรุง โรงพยาบาลพยุหะคีรี อำเภอพยุหะคีรี จังหวัดนครสวรรค์";
+  // ผู้จัดทำและเสนอรายงานในหน้าบันทึกข้อความราชการ (แยกต่างหากจากช่างที่ตรวจหน้างาน)
+  const memoReporterName = saved?.authorName || "นายพิรุฬห์ บุญเพ็ชร์";
+  const memoReporterPos = saved?.authorPos || "พนักงานทั่วไป";
+
+  // ผู้จัดทำและผู้บริหาร
+  const authorName = memoReporterName;
+  const authorPos = memoReporterPos;
+  const chefReviewerName = getCleanName(document.getElementById('report-reviewer-name')?.value.trim() || "นายคมสัน ศรีสิงห์");
+  const chefReviewerPos1 = "นักเทคนิคการแพทย์ปฏิบัติการ รักษาการในตำแหน่ง";
+  const chefReviewerPos2 = "หัวหน้ากลุ่มงานบริหารทั่วไป";
+  const approverName = "นางสาวศิริพรรณ ชมพูภู่";
+  const approverPos = "ผู้อำนวยการโรงพยาบาลพยุหะคีรี";
+
+  // วันที่ปัจจุบันแบบไทย
+  const now = new Date();
+  const thaiDay = toThaiNumerals(24);
+  const thaiMonth = 'ตุลาคม';
+  const thaiYear = toThaiNumerals(2569);
+  const thaiDateFormatted = `๒๔   ตุลาคม   ๒๕๖๙`;
+
+  const deptVal = (saved?.dept && !saved.dept.includes('และงานซ่อมบำรุง') && !saved.dept.includes('อำเภอพยุหะคีรี'))
+    ? saved.dept
+    : "กลุ่มงานบริหารทั่วไป โรงพยาบาลพยุหะคีรี";
   const docNoVal = saved?.docNo || `นว ๐๐๓๓.๓/พิเศษ`;
-  const docDateVal = saved?.docDate || thaiDateFormatted;
-  const subjectVal = saved?.subject || `รายงานผลการตรวจสอบความพร้อมอุปกรณ์ความปลอดภัยอัคคีภัยและโคมไฟฉุกเฉิน ประจำงวดปีงบประมาณ ${thaiYear}`;
+  const docDateVal = saved?.docDate || `๒๔   ตุลาคม   ๒๕๖๙`;
+  const subjectVal = saved?.subject || `รายงานผลการตรวจสอบความพร้อมอุปกรณ์ความปลอดภัยอัคคีภัยและโคมไฟฉุกเฉิน ประจำเดือนตุลาคม ๒๕๖๙`;
   const toVal = saved?.to || "ผู้อำนวยการโรงพยาบาลพยุหะคีรี";
 
   const defaultBgText = `ด้วย งานอาคารสถานที่และซ่อมบำรุง กลุ่มงานบริหารทั่วไป โรงพยาบาลพยุหะคีรี มีภารกิจในการดูแล บำรุงรักษา และกำกับความพร้อมใช้งานของระบบความปลอดภัยด้านกายภาพและสิ่งแวดล้อม ตามเกณฑ์ MOIT ๒ ข้อ ๒ (๒.๒) และมาตรฐาน HA ตอนที่ II (ENV 1-4) เพื่อประโยชน์และความปลอดภัยสูงสุดต่อผู้ป่วย ญาติ และบุคลากรผู้ปฏิบัติงาน ให้เป็นไปตามพระราชบัญญัติควบคุมอาคาร และมาตรฐานความปลอดภัยด้านอัคคีภัยในสถานพยาบาลอย่างเคร่งครัด`;
@@ -826,207 +879,85 @@ window.renderOfficialMemo = function () {
         </div>
       </div>
 
-      <!-- ส่วนหัวหนังสือราชการ -->
-      <table class="memo-info-table" style="font-size:${memoFontConfig.header}pt;">
+      <!-- ส่วนหัวหนังสือราชการ (ระเบียบ: ส่วนราชการ, ที่, วันที่, เรื่อง ตัวหนา 20pt) -->
+      <table class="memo-info-table" style="font-size:${memoFontConfig.header}pt; border-collapse:collapse; width:100%; margin-bottom:8px;">
         <tr>
-          <td colspan="2" style="padding-bottom:5px;">
+          <td colspan="2" style="padding-bottom:4px;">
             <div style="display:flex; align-items:flex-start;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:85px; flex-shrink:0;">ส่วนราชการ</span>
-              <div style="flex:1; line-height:1.4; font-size:${memoFontConfig.header}pt;">
-                <span id="memo-dept" class="memo-editable" contenteditable="true" style="font-size:${memoFontConfig.header}pt;">${deptVal}</span>
+              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; font-weight:700; min-width:95px; flex-shrink:0;">ส่วนราชการ</span>
+              <div style="flex:1; line-height:1.25; font-size:16pt; font-weight:normal; margin-left:8px;">
+                <span id="memo-dept" class="memo-editable" contenteditable="true" style="font-size:16pt;">${deptVal}</span>
               </div>
             </div>
           </td>
         </tr>
         <tr>
-          <td style="width:52%; padding-bottom:5px;">
+          <td style="width:50%; padding-bottom:4px;">
             <div style="display:flex; align-items:center;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:30px; flex-shrink:0;">ที่</span>
-              <span id="memo-doc-no" class="memo-editable" contenteditable="true" style="margin-left:8px; min-width:140px; font-size:${memoFontConfig.header}pt;">${docNoVal}</span>
+              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; font-weight:700; min-width:25px; flex-shrink:0;">ที่</span>
+              <span id="memo-doc-no" class="memo-editable" contenteditable="true" style="margin-left:8px; min-width:140px; font-size:16pt; font-weight:normal;">${docNoVal}</span>
             </div>
           </td>
-          <td style="width:48%; padding-bottom:5px;">
+          <td style="width:50%; padding-bottom:4px;">
             <div style="display:flex; align-items:center;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:45px; flex-shrink:0;">วันที่</span>
-              <span id="memo-doc-date" class="memo-editable" contenteditable="true" style="margin-left:8px; min-width:140px; font-size:${memoFontConfig.header}pt;">${docDateVal}</span>
+              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; font-weight:700; min-width:45px; flex-shrink:0;">วันที่</span>
+              <span id="memo-doc-date" class="memo-editable" contenteditable="true" style="margin-left:8px; min-width:140px; font-size:16pt; font-weight:normal;">${docDateVal}</span>
             </div>
           </td>
         </tr>
         <tr>
-          <td colspan="2" style="padding-bottom:5px;">
+          <td colspan="2" style="padding-bottom:4px;">
             <div style="display:flex; align-items:flex-start;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:45px; flex-shrink:0;">เรื่อง</span>
-              <div style="flex:1; line-height:1.4; font-size:${memoFontConfig.header}pt;">
-                <span id="memo-subject" class="memo-editable" contenteditable="true" style="font-size:${memoFontConfig.header}pt; font-weight:700;">${subjectVal}</span>
+              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; font-weight:700; min-width:45px; flex-shrink:0;">เรื่อง</span>
+              <div style="flex:1; line-height:1.25; font-size:16pt; font-weight:normal; margin-left:8px;">
+                <span id="memo-subject" class="memo-editable" contenteditable="true" style="font-size:16pt;">${subjectVal}</span>
               </div>
             </div>
           </td>
         </tr>
         <tr>
-          <td colspan="2" style="padding-top:2px; padding-bottom:12px;">
+          <td colspan="2" style="padding-top:4px; padding-bottom:8px;">
             <div style="display:flex; align-items:center;">
-              <span class="memo-label" style="font-size:${memoFontConfig.header}pt; min-width:45px; flex-shrink:0;">เรียน</span>
-              <span id="memo-to" class="memo-editable" contenteditable="true" style="margin-left:8px; font-size:${memoFontConfig.header}pt;">${toVal}</span>
+              <span class="memo-label" style="font-size:16pt; font-weight:normal; min-width:45px; flex-shrink:0;">เรียน</span>
+              <span id="memo-to" class="memo-editable" contenteditable="true" style="margin-left:8px; font-size:16pt; font-weight:normal;">${toVal}</span>
             </div>
           </td>
         </tr>
       </table>
 
-      <!-- ย่อหน้าที่ 1: ความเป็นมา -->
-      <div class="memo-section-heading" style="font-size:${memoFontConfig.body}pt;">ความเป็นมา</div>
-      <div id="memo-para-bg" class="memo-para memo-editable-block" contenteditable="true" style="font-size:${memoFontConfig.body}pt;">
+      <!-- ย่อหน้าที่ 1: เรื่องเดิม / ความเป็นมา (ย่อหน้า 2.5 ซม.) -->
+      <div id="memo-para-bg" class="memo-para memo-editable-block" contenteditable="true" style="font-size:${memoFontConfig.body}pt; text-indent:2.5cm; margin-bottom:8px; text-align:justify;">
         ${bgText}
       </div>
 
-      <!-- ย่อหน้าที่ 2: ข้อพิจารณา -->
-      <div class="memo-section-heading" style="font-size:${memoFontConfig.body}pt;">ข้อพิจารณา</div>
-      <div id="memo-para-consider" class="memo-para memo-editable-block" contenteditable="true" style="font-size:${memoFontConfig.body}pt;">
+      <!-- ย่อหน้าที่ 2: ข้อเท็จจริง / รายงานผล (ย่อหน้า 2.5 ซม.) -->
+      <div id="memo-para-consider" class="memo-para memo-editable-block" contenteditable="true" style="font-size:${memoFontConfig.body}pt; text-indent:2.5cm; margin-bottom:8px; text-align:justify;">
         ${considerText}
       </div>
 
-      <!-- ย่อหน้าที่ 3: ข้อเสนอ / ข้อสั่งการ -->
-      <div id="memo-para-propose" class="memo-para memo-editable-block" contenteditable="true" style="font-size:${memoFontConfig.body}pt; margin-top:14px; margin-bottom:20px;">
+      <!-- ย่อหน้าที่ 3: ข้อพิจารณา / ข้อเสนอ (ย่อหน้า 2.5 ซม.) -->
+      <div id="memo-para-propose" class="memo-para memo-editable-block" contenteditable="true" style="font-size:${memoFontConfig.body}pt; text-indent:2.5cm; margin-top:8px; margin-bottom:18px; text-align:justify;">
         ${proposeText}
       </div>
 
-      <!-- ส่วนลงนามผู้รายงาน, กล่องเสนอ ผอ. (หน.กลุ่มงาน), และคำสั่งการผู้อำนวยการ -->
+      <!-- ส่วนลงนามผู้เสนอ/ผู้รายงาน (ตามแบบที่ ๒ ท้ายระเบียบงานสารบรรณ: ลงชื่อ, พิมพ์ชื่อเต็ม, ตำแหน่ง อยู่ฝั่งขวา) -->
       ${(() => {
-        // ดึง offset ที่บันทึกไว้สำหรับกล่อง ผอ.
-        try {
-          const rawOff = storageService.get('pyh_memo_exec_box_offset');
-          if (rawOff) memoExecBoxOffset = JSON.parse(rawOff);
-        } catch(e) {}
-
-        // ดึง offset ที่บันทึกไว้สำหรับกล่อง หน.กลุ่มงาน
-        try {
-          const rawChefOff = storageService.get('pyh_memo_chef_box_offset');
-          if (rawChefOff) memoChefBoxOffset = JSON.parse(rawChefOff);
-        } catch(e) {}
-
-        const transformStyle = (memoExecBoxOffset.x || memoExecBoxOffset.y) 
-          ? `transform: translate(${memoExecBoxOffset.x}px, ${memoExecBoxOffset.y}px);` 
-          : '';
-
-        const chefTransformStyle = (memoChefBoxOffset.x || memoChefBoxOffset.y)
-          ? `transform: translate(${memoChefBoxOffset.x}px, ${memoChefBoxOffset.y}px);`
-          : '';
-
-        // กล่องคำสั่งการ / การอนุมัติของ ผอ. (รองรับการใช้เมาส์ลากย้ายตำแหน่งได้อิสระ)
-        const execBoxHtml = `
-          <div id="memo-exec-box-card" style="margin-top:${memoExecBoxMarginTop}px; padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; background:#fafafa; text-align:left; cursor:grab; position:relative; ${transformStyle}">
-            <div id="memo-exec-box-drag-handle" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; user-select:none;">
-              <span style="font-weight:700; font-size:${memoFontConfig.sign}pt; color:#0f172a;">คำสั่งการ / การอนุมัติ</span>
-              <span class="no-print" style="font-size:11px; color:#94a3b8; display:flex; align-items:center; gap:3px; background:#f1f5f9; padding:2px 6px; border-radius:4px;" title="คลิกค้างแล้วลากเมาส์เพื่อย้ายตำแหน่งกล่อง ผอ. ได้อย่างอิสระ">
-                ✥ ลากย้ายได้
-              </span>
-            </div>
-            
-            <!-- ตัวเลือกคำสั่งการแบบช่องเช็ก [ ✓ ] รับทราบ [   ] อนุมัติซ่อมแซม (คลิกสลับได้โดยตรง) -->
-            <div style="margin-bottom:10px; font-size:${memoFontConfig.sign}pt; display:flex; flex-wrap:wrap; gap:16px; align-items:center;">
-              <span id="print-appr-ack" onclick="setExecutiveApproval('acknowledge')" style="cursor:pointer; user-select:none; font-family:'TH Sarabun New', 'Sarabun', sans-serif;">[ &nbsp; ] รับทราบ</span>
-              <span id="print-appr-repair" onclick="setExecutiveApproval('repair')" style="cursor:pointer; user-select:none; font-family:'TH Sarabun New', 'Sarabun', sans-serif;">[ ✓ ] อนุมัติซ่อมแซม</span>
-            </div>
-
-            <!-- ช่องลงนาม ผอ. (ไม่มีบรรทัดวันที่) -->
-            <div style="text-align:center; margin-top:10px;">
-              <div id="exec-cert-container" style="min-height:28px;">
-                <!-- เติมโดย renderExecutiveCertificationUI() -->
-              </div>
-              <div style="border-bottom:1px dotted #94a3b8; width:80%; margin:4px auto 4px auto;"></div>
-              <div style="font-weight:700; font-size:${memoFontConfig.sign}pt;" id="report-display-exec-name">( ${approverName} )</div>
-              <div style="font-size:${memoFontConfig.sign - 2}pt; color:#475569;">${approverPos}</div>
-            </div>
-          </div>
+        return `
+          <table class="memo-sign-table" style="width:100%; font-size:${memoFontConfig.sign}pt; border-collapse:collapse; margin-top:24px;">
+            <tr>
+              <td style="width:50%;"></td>
+              <td style="width:50%; vertical-align:top; text-align:center;">
+                <!-- ช่องลายเซ็น (ลงชื่อ) -->
+                <div style="font-size:${memoFontConfig.sign}pt; margin-bottom:4px;">(ลงชื่อ)</div>
+                <div id="tech-cert-container" style="min-height:36px; display:flex; justify-content:center; align-items:center;">
+                  <!-- เติมโดย renderTechCertificationUI() -->
+                </div>
+                <div style="font-weight:normal; font-size:${memoFontConfig.sign}pt; margin-top:4px;">( <span id="report-display-tech-name" class="memo-editable" contenteditable="true">${authorName}</span> )</div>
+                <div style="font-size:${memoFontConfig.sign}pt; color:#000000; margin-top:2px;">ตำแหน่ง <span id="report-display-tech-pos" class="memo-editable" contenteditable="true">${authorPos}</span></div>
+              </td>
+            </tr>
+          </table>
         `;
-
-        // ส่วนลงนามผู้จัดทำ / ผู้รายงาน (ช่างเทคนิค - ไม่มีบรรทัดวันที่)
-        const techSignHtml = `
-          <div style="margin-top:6px; text-align:center;">
-            <!-- ลายเซ็นดิจิทัลของช่าง/ผู้รายงาน -->
-            <div id="tech-cert-container" style="min-height:36px;">
-              <!-- เติมโดย renderTechCertificationUI() -->
-            </div>
-
-            <div style="border-bottom:1px dotted #94a3b8; width:75%; margin:4px auto 6px auto;"></div>
-            <div style="font-weight:700; font-size:${memoFontConfig.sign}pt;" id="report-display-tech-name">( ${authorName} )</div>
-            <div style="font-size:${memoFontConfig.sign - 1}pt; color:#334155;" id="report-display-tech-pos">${authorPos}</div>
-          </div>
-        `;
-
-        // กล่องข้อความหัวหน้ากลุ่มงานบริหารทั่วไป (เสนอ ผอ.)
-        const chefBoxHtml = `
-          <div id="memo-chef-box-card" style="margin-top:${memoExecBoxMarginTop}px; padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; background:#fafafa; text-align:left; cursor:grab; position:relative; ${chefTransformStyle}">
-            <div id="memo-chef-box-drag-handle" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; user-select:none;">
-              <span style="font-weight:700; font-size:${memoFontConfig.sign}pt; color:#0f172a;">เรียน ผู้อำนวยการโรงพยาบาลพยุหะคีรี</span>
-              <span class="no-print" style="font-size:11px; color:#94a3b8; display:flex; align-items:center; gap:3px; background:#f1f5f9; padding:2px 6px; border-radius:4px;" title="คลิกค้างแล้วลากเมาส์เพื่อย้ายตำแหน่งกล่องนี้ได้อย่างอิสระ">
-                ✥ ลากย้ายได้
-              </span>
-            </div>
-
-            <!-- ข้อความเพื่อรับทราบ / พิจารณาอนุมัติ (คลิกสลับได้) -->
-            <div style="margin-bottom:10px; font-size:${memoFontConfig.sign}pt; display:flex; flex-wrap:wrap; gap:14px; align-items:center;">
-              <span style="font-weight:600;">เพื่อ</span>
-              <span id="memo-chef-opt-ack" onclick="setChefApproval('ack')" style="cursor:pointer; user-select:none; font-family:'TH Sarabun New', 'Sarabun', sans-serif;">[ ✓ ] โปรดรับทราบ</span>
-              <span id="memo-chef-opt-approve" onclick="setChefApproval('approve')" style="cursor:pointer; user-select:none; font-family:'TH Sarabun New', 'Sarabun', sans-serif;">[ &nbsp; ] โปรดพิจารณาอนุมัติ</span>
-            </div>
-
-            <!-- ช่องลายเซ็นหัวหน้ากลุ่มงาน -->
-            <div style="text-align:center; margin-top:8px;">
-              <div id="memo-chef-cert-container" style="min-height:28px;">
-                <!-- เติมโดย renderChefCertificationUI() -->
-              </div>
-              <div style="border-bottom:1px dotted #94a3b8; width:80%; margin:4px auto 4px auto;"></div>
-              <div style="font-weight:700; font-size:${memoFontConfig.sign}pt;" id="memo-display-chef-name">( ${chefReviewerName} )</div>
-              <div style="font-size:${memoFontConfig.sign - 2}pt; color:#475569;">${chefReviewerPos1}</div>
-              <div style="font-size:${memoFontConfig.sign - 2}pt; color:#475569;">${chefReviewerPos2}</div>
-            </div>
-          </div>
-        `;
-
-        if (memoExecBoxPosition === 'right') {
-          // ถ้าเลือกตำแหน่ง 'ขวา': วางช่างทางขวา, กล่อง หน.กลุ่มงาน ถัดลงมา, แล้วตามด้วยกล่อง ผอ.
-          return `
-            <table class="memo-sign-table" style="width:100%; font-size:${memoFontConfig.sign}pt; border-collapse:collapse;">
-              <tr>
-                <td style="width:40%;"></td>
-                <td style="width:60%; vertical-align:top; text-align:center;">
-                  ${techSignHtml}
-                </td>
-              </tr>
-              <tr>
-                <td style="width:40%;"></td>
-                <td style="width:60%; vertical-align:top;">
-                  ${chefBoxHtml}
-                </td>
-              </tr>
-              <tr>
-                <td style="width:40%;"></td>
-                <td style="width:60%; vertical-align:top;">
-                  ${execBoxHtml}
-                </td>
-              </tr>
-            </table>
-          `;
-        } else {
-          // ตำแหน่ง 'ซ้าย' (มาตรฐาน 2 คอลัมน์):
-          // ฝั่งซ้าย: กล่อง ผอ. (คำสั่งการ / การอนุมัติ)
-          // ฝั่งขวา: ลายเซ็นช่างผู้รายงาน + กล่อง หน.กลุ่มงาน (เรียน ผอ. เพื่อโปรดรับทราบ/อนุมัติ)
-          return `
-            <table class="memo-sign-table" style="width:100%; font-size:${memoFontConfig.sign}pt; border-collapse:collapse;">
-              <tr>
-                <td style="width:48%; vertical-align:top; padding-right:12px;">
-                  ${execBoxHtml}
-                </td>
-                <td style="width:52%; vertical-align:top; padding-left:8px;">
-                  ${techSignHtml}
-                  <div style="margin-top:14px;">
-                    ${chefBoxHtml}
-                  </div>
-                </td>
-              </tr>
-            </table>
-          `;
-        }
       })()}
     </div>
   `;
@@ -1530,7 +1461,7 @@ window.generateExecutiveReport = function () {
   container.scrollIntoView({ behavior: 'smooth' });
 };
 
-window.simulateFullInspection = function () {
+window.simulateFullInspection = async function () {
   if ((_appContext.getCurrentUserRole()) === 'guest' || !(_appContext.getCurrentUserRole())) {
     alert("🔒 โหมดผู้เยี่ยมชม (Guest) ดูข้อมูลได้อย่างเดียวเท่านั้น\nกรุณาเข้าสู่ระบบด้วยบัญชีเจ้าหน้าที่เพื่อดำเนินการนี้");
     return;
@@ -1541,56 +1472,50 @@ window.simulateFullInspection = function () {
     return;
   }
 
-  const now = new Date();
-  const officer = (_appContext.getCurrentOfficer()) || "นายสมหมาย ใจดี (ช่างซ่อมบำรุง)";
-  const nowStr = now.toLocaleString('th-TH');
-  const nowIso = now.toISOString();
+  // กำหนดช่วงวันตรวจจำลอง: 19 - 22 ตุลาคม 2569 (ค.ศ. 2026)
+  const inspectionDays = [19, 20, 21, 22];
+  const officer = getCleanName((_appContext.getCurrentOfficer())) || "นายสุวิทย์ พวงสมบัติ";
 
   // สร้าง simulated logs ใหม่
   const simLogs = [];
 
   (_appContext.getAssetsList()).forEach((asset, idx) => {
     let status = "READY";
-    let notes = "ตรวจเช็กสภาพสมบูรณ์ พร้อมใช้งาน 100%";
+    let notes = "ตรวจเช็กสภาพสมบูรณ์ แรงดันปกติ สลักนิรภัยแน่นหนา ทางเข้าถึงสะดวก พร้อมใช้งาน 100%";
     let details = {};
 
     const isFE = asset.assetId.startsWith('PYH-FE') || asset.type.includes('ถังดับเพลิง');
 
-    // จำลอง 3 จุดที่มีข้อบกพร่องตามสภาพการใช้งานจริงในโรงพยาบาล
-    if (asset.assetId === 'PYH-FE-ER1-01') {
-      status = "ISSUE";
-      details = { body: "PASS", pressure: "FAIL", access: "PASS" };
-      notes = "เกจ์วัดแรงดันตกต่ำกว่าขีดเขียว (Undercharged) และสายฉีดเริ่มมีรอยแตกลายงา";
-    } else if (asset.assetId === 'PYH-EM-HPC-02') {
-      status = "ISSUE";
-      details = { light: "PASS", test: "FAIL", plug: "PASS" };
-      notes = "กดปุ่มทดสอบ Test Switch แล้วไฟไม่สว่าง แบตเตอรี่เสื่อมสภาพไม่สำรองไฟ";
-    } else if (asset.assetId === 'PYH-FE-IPD-03') {
-      status = "ISSUE";
-      details = { body: "FAIL", pressure: "PASS", access: "PASS" };
-      notes = "สลักนิรภัย (Safety Pin) และสายซีลล็อคหลุดหาย ตัวถังมีรอยครูดถลอก";
+    // สุ่มวันตรวจกระจายในช่วง 19-22 ตุลาคม 2569
+    const day = inspectionDays[idx % inspectionDays.length];
+    const hour = 9 + (idx % 7); // 09:00 - 15:00 น.
+    const minute = (idx * 13) % 60;
+    // ค.ศ. 2026 คือ พ.ศ. 2569, เดือน 9 คือ ตุลาคม (0-indexed)
+    const checkDate = new Date(2026, 9, day, hour, minute, 0);
+    const checkIso = checkDate.toISOString();
+    const checkStr = checkDate.toLocaleString('th-TH');
+
+    // ตรวจผ่านพร้อมใช้งานสมบูรณ์ 100% ทุกจุด
+    if (isFE) {
+      details = { body: "PASS", pressure: "PASS", access: "PASS" };
     } else {
-      if (isFE) {
-        details = { body: "PASS", pressure: "PASS", access: "PASS" };
-      } else {
-        details = { light: "PASS", test: "PASS", plug: "PASS" };
-      }
+      details = { light: "PASS", test: "PASS", plug: "PASS" };
     }
 
     asset.status = status;
-    asset.lastChecked = nowIso;
+    asset.lastChecked = checkIso;
     asset.lastInspector = officer;
 
     simLogs.push({
-      id: `SIM_LOG_${Date.now()}_${idx}`,
+      id: `SIM_LOG_${checkDate.getTime()}_${idx}`,
       assetId: asset.assetId,
       inspector: officer,
       status: status,
       details: details,
       notes: notes,
       photoURL: "",
-      timestampStr: nowStr,
-      timestampISO: nowIso
+      timestampStr: checkStr,
+      timestampISO: checkIso
     });
   });
 
@@ -1598,12 +1523,57 @@ window.simulateFullInspection = function () {
   storageService.set('pyh_assets_data', (_appContext.getAssetsList()));
   storageService.set('pyh_inspection_logs', inspectionLogs);
 
+  // ปรับบันทึกข้อความราชการให้ลงวันที่และช่วงตรวจ ตุลาคม 2569
+  try {
+    let memoData = storageService.get('pyh_custom_memo_data');
+    if (memoData) {
+      memoData = typeof memoData === 'string' ? JSON.parse(memoData) : memoData;
+    } else {
+      memoData = {};
+    }
+    memoData.docDate = "๒๔   ตุลาคม   ๒๕๖๙";
+    memoData.dept = "กลุ่มงานบริหารทั่วไป โรงพยาบาลพยุหะคีรี";
+    memoData.authorName = "นายพิรุฬห์ บุญเพ็ชร์";
+    memoData.authorPos = "พนักงานทั่วไป";
+    memoData.subject = "รายงานผลการตรวจสอบความพร้อมอุปกรณ์ความปลอดภัยอัคคีภัยและโคมไฟฉุกเฉิน ประจำเดือนตุลาคม ๒๕๖๙";
+    storageService.set('pyh_custom_memo_data', memoData);
+  } catch (e) {
+    console.warn("Could not auto-set memoData date", e);
+  }
+
+  // ซิงก์ผลการตรวจทั้งหมดขึ้น Firebase Cloud ทันที (หากต่อเน็ตและเชื่อมต่อ Firebase สำเร็จ)
+  let cloudSynced = false;
+  if (isFirebaseReady() && db) {
+    try {
+      const assetPromises = (_appContext.getAssetsList()).map(async (asset) => {
+        const docId = asset.firestoreId || asset.assetId.replace(/[^a-zA-Z0-9]/g, '_');
+        return setDoc(doc(db, "assets", docId), {
+          ...asset,
+          status: "READY",
+          lastChecked: asset.lastChecked,
+          lastInspector: asset.lastInspector
+        }, { merge: true });
+      });
+
+      const logPromises = simLogs.map(async (log) => {
+        return addDoc(collection(db, "inspection_logs"), log);
+      });
+
+      await Promise.all([...assetPromises, ...logPromises]);
+      cloudSynced = true;
+      console.log("🔥 Successfully synced all simulated inspections to Firebase Cloud Firestore!");
+    } catch (firebaseErr) {
+      console.warn("⚠️ Firebase cloud sync error during simulation:", firebaseErr);
+    }
+  }
+
   updateDashboardUI();
   renderMapPins();
   renderHistoryTable();
   window.renderSelectedReport();
 
-  alert(`⚡ จำลองผลการตรวจเช็กเสร็จสิ้นครบ 100% (${(_appContext.getAssetsList()).length} จุดตรวจ)\n• ผลปกติพร้อมใช้งาน: ${(_appContext.getAssetsList()).filter(a => a.status === 'READY').length} จุด\n• พบข้อบกพร่องแจ้งซ่อม: ${(_appContext.getAssetsList()).filter(a => a.status === 'ISSUE').length} จุด (ER1-01, HPC-02, IPD-03)\nระบบได้ประมวลผลรายงานสรุปเสนอผู้บริหารให้ทันทีด้านล่าง!`);
+  const cloudNotice = cloudSynced ? "\n☁️ บันทึกซิงก์ขึ้นระบบ Firebase Cloud สำเร็จเรียบร้อย!" : "\n💾 บันทึกในระบบเครื่องเรียบร้อย";
+  alert(`⚡ จำลองผลการตรวจเช็กประจำเดือนตุลาคม ๒๕๖๙ เสร็จสิ้นครบ 100% (${(_appContext.getAssetsList()).length} จุดตรวจ)\n• ช่วงวันที่ตรวจ: 19 - 22 ตุลาคม 2569\n• ผลการตรวจ: พร้อมใช้งานสมบูรณ์ครบ 100% ทั้งหมด ${(_appContext.getAssetsList()).length} จุด (ไม่มีชำรุด)${cloudNotice}`);
 };
 
 window.printExecutiveReport = function () {

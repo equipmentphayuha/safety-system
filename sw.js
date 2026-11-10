@@ -2,7 +2,7 @@
 // Service Worker สำหรับ Pyuha Safety System
 // รองรับการทำงานแบบ Offline First (แคชภาพผังอาคาร, สไตล์ชีต, และสคริปต์หลัก)
 
-const CACHE_NAME = 'pyuha-safety-v1.0.0';
+const CACHE_NAME = 'pyuha-safety-v1.2.1';
 
 const PRECACHE_ASSETS = [
   './',
@@ -13,6 +13,8 @@ const PRECACHE_ASSETS = [
   './app.js?v=1.0.0',
   './js/constants.js',
   './js/auth.js',
+  './js/checklist-config.js',
+  './js/offline-sync.js',
   './js/report-constants.js',
   './js/report-module.js',
   './js/scanner-controller.js',

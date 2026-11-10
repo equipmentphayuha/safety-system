@@ -1299,14 +1299,18 @@ body.role-admin #admin-map-drag-notice {
     display: none !important;
   }
 
-  /* Official Memo Print Adjustments */
+  /* Official Memo Print Adjustments (ตามระเบียบงานสารบรรณ) */
   .memo-paper {
     box-shadow: none !important;
     border: none !important;
-    margin: 0 auto !important;
+    margin: 0 !important;
     width: 210mm !important;
     max-width: none !important;
     min-height: auto !important;
+    padding-top: 1.5cm !important;
+    padding-left: 3.0cm !important;
+    padding-right: 2.0cm !important;
+    padding-bottom: 2.0cm !important;
   }
   .memo-editable {
     outline: none !important;
@@ -1323,8 +1327,8 @@ body.role-admin #admin-map-drag-notice {
     padding: 0 !important;
   }
   .memo-garuda-img {
-    width: 3cm !important;
-    height: auto !important;
+    width: 1.5cm !important;
+    height: 1.5cm !important;
     image-rendering: -webkit-optimize-contrast;
     image-rendering: crisp-edges;
   }
@@ -1339,13 +1343,13 @@ body.role-admin #admin-map-drag-notice {
   width: 210mm;
   min-height: 297mm;
   margin: 0 auto 20px auto;
-  padding: 2cm 2.5cm 2cm 2.5cm;
+  padding: 1.5cm 2.0cm 2.0cm 3.0cm; /* บน 1.5 ซม., ขวา 2.0 ซม., ล่าง 2.0 ซม., ซ้าย 3.0 ซม. ตามระเบียบ */
   box-sizing: border-box;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
   border: 1px solid #cbd5e1;
-  font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
+  font-family: 'TH Sarabun New', 'Sarabun', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 16pt;
-  line-height: 1.45;
+  line-height: 1.25;
   text-align: justify;
   position: relative;
   transition: all 0.2s ease;
@@ -1354,27 +1358,28 @@ body.role-admin #admin-map-drag-notice {
 /* หัวบันทึกข้อความ */
 .memo-header-top {
   position: relative;
-  min-height: 115px;
-  margin-bottom: 12px;
+  min-height: 60px;
+  margin-bottom: 8px;
 }
 .memo-garuda-img {
   position: absolute;
   left: 0;
   top: 0;
-  width: 75px;
-  height: auto;
+  width: 1.5cm;
+  height: 1.5cm;
   display: block;
 }
 .memo-title-banner {
   text-align: center;
-  padding-top: 25px;
+  padding-top: 0px;
 }
 .memo-title-banner h1 {
-  font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
+  font-family: 'TH Sarabun New', 'Sarabun', sans-serif;
   font-size: 29pt;
   font-weight: 700;
   color: #000000;
   margin: 0;
+  line-height: 35pt; /* ระยะห่างบรรทัดค่าแน่นอน 35 pt */
   letter-spacing: 0.5px;
 }
 
