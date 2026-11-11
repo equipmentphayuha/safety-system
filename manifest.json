@@ -8,13 +8,18 @@
   "theme_color": "#004d40",
   "icons": [
     {
-      "src": "garuda.svg",
+      "src": "moph_logo.svg",
       "sizes": "any",
       "type": "image/svg+xml"
     },
     {
-      "src": "garuda.png",
-      "sizes": "56x61",
+      "src": "moph_192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "moph_512.png",
+      "sizes": "512x512",
       "type": "image/png"
     }
   ]

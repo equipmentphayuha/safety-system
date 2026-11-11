@@ -2,7 +2,7 @@
 // Service Worker สำหรับ Pyuha Safety System
 // รองรับการทำงานแบบ Offline First (แคชภาพผังอาคาร, สไตล์ชีต, และสคริปต์หลัก)
 
-const CACHE_NAME = 'pyuha-safety-v1.2.1';
+const CACHE_NAME = 'pyuha-safety-v1.2.2';
 
 const PRECACHE_ASSETS = [
   './',
@@ -21,6 +21,9 @@ const PRECACHE_ASSETS = [
   './js/register-controller.js',
   './js/events.js',
   './js/storage-service.js',
+  './moph_logo.svg',
+  './moph_192.png',
+  './moph_512.png',
   './garuda.png',
   './initial_assets.json',
   // ผังอาคารทั้ง 9 โซน
