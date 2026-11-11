@@ -1,6 +1,6 @@
 import { storageService } from './js/storage-service.js';
 // app.js
-// ระบบตรวจสอบความปลอดภัยถังดับเพลิงและไฟฉุกเฉิน โรงพยาบาลพยุหะคีรี (Pyuha Safety System)
+// ระบบตรวจสอบความปลอดภัยถังดับเพลิงและไฟฉุกเฉิน โรงพยาบาลพยุหะคีรี (Phayuha Hospital Safety)
 
 import {
   db, storage, auth, isFirebaseReady,
@@ -3405,7 +3405,7 @@ window.exportSystemData = function () {
   try {
     const backupData = {
       hospital: "โรงพยาบาลพยุหะคีรี",
-      system: "Pyuha Smart Fire & Safety Cloud",
+      system: "Phayuha Hospital Safety",
       exportedAt: new Date().toISOString(),
       assets: assetsList,
       inspection_logs: inspectionLogs
@@ -3415,7 +3415,7 @@ window.exportSystemData = function () {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `backup_pyuha_safety_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `backup_phayuha_safety_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     alert("ดาวน์โหลดไฟล์สำรองข้อมูล (JSON) สำเร็จแล้ว สามารถนำไปใช้ในระบบของโรงพยาบาลได้ทันที");

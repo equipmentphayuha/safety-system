@@ -1222,7 +1222,7 @@ window.generateExecutiveReport = function () {
       <div class="report-header-banner">
         <div>
           <div style="font-size:12px; font-weight:700; color:#00695c; letter-spacing:0.5px; text-transform:uppercase;">
-            Pyuha Kiri Hospital • Environmental and Safety Committee (HA ENV)
+            Phayuha Kiri Hospital • Environmental and Safety Committee (HA ENV)
           </div>
           <h2 class="report-title">รายงานสรุปผลการตรวจสอบความพร้อมใช้งานระบบความปลอดภัยและอัคคีภัย</h2>
           <p class="report-subtitle">

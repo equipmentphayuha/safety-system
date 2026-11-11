@@ -1,5 +1,5 @@
 // firebase-config.js
-// ระบบตรวจสอบความปลอดภัย - โรงพยาบาลพยุหะคีรี (Pyuha Safety System)
+// ระบบตรวจสอบความปลอดภัย - โรงพยาบาลพยุหะคีรี (Phayuha Hospital Safety)
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { 

@@ -1,8 +1,8 @@
 // sw.js
-// Service Worker สำหรับ Pyuha Safety System
+// Service Worker สำหรับ Phayuha Hospital Safety
 // รองรับการทำงานแบบ Offline First (แคชภาพผังอาคาร, สไตล์ชีต, และสคริปต์หลัก)
 
-const CACHE_NAME = 'pyuha-safety-v1.2.2';
+const CACHE_NAME = 'phayuha-hospital-safety-v1.3.0';
 
 const PRECACHE_ASSETS = [
   './',

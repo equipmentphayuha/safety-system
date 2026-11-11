@@ -1,6 +1,6 @@
 {
-  "name": "ระบบตรวจสอบความปลอดภัย โรงพยาบาลพยุหะคีรี",
-  "short_name": "Pyuha Safety",
+  "name": "Phayuha Hospital Safety",
+  "short_name": "Phayuha Hospital Safety",
   "description": "ระบบตรวจสอบความปลอดภัยถังดับเพลิงและไฟฉุกเฉิน โรงพยาบาลพยุหะคีรี",
   "start_url": "./index.html",
   "display": "standalone",

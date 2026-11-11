@@ -1,5 +1,5 @@
 {
-  "name": "pyuha-safety-system",
+  "name": "phayuha-hospital-safety",
   "version": "1.0.0",
   "description": "ระบบตรวจสอบความปลอดภัยถังดับเพลิงและไฟฉุกเฉิน โรงพยาบาลพยุหะคีรี",
   "main": "app.js",
@@ -13,7 +13,7 @@
     "fire-safety",
     "emergency-light",
     "pwa",
-    "pyuha-hospital"
+    "phayuha-hospital"
   ],
   "author": "โรงพยาบาลพยุหะคีรี",
   "license": "ISC"

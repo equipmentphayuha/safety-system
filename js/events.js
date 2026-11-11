@@ -1,5 +1,5 @@
 // js/events.js
-// ระบบผูก Event Delegation ส่วนกลางสำหรับ Pyuha Safety System
+// ระบบผูก Event Delegation ส่วนกลางสำหรับ Phayuha Hospital Safety
 // กำจัด inline onclick ทั้งหมดใน index.html
 
 export function initGlobalEvents() {
