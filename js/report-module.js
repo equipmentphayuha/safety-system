@@ -1003,8 +1003,8 @@ window.generateExecutiveReport = function () {
   const buildingFilter = document.getElementById('report-building-filter')?.value || "all";
 
   // ส่วนที่ 1: ผู้จัดทำและเสนอรายงาน
-  const authorName = getCleanName(document.getElementById('report-author-name')?.value.trim() || "นายสุวิทย์ พวงสมบัติ");
-  const authorPos = document.getElementById('report-author-pos')?.value.trim() || "นายช่างเทคนิค";
+  const authorName = getCleanName(document.getElementById('report-author-name')?.value.trim() || "นายพิรุฬห์ บุญเพ็ชร์");
+  const authorPos = document.getElementById('report-author-pos')?.value.trim() || "พนักงานทั่วไป";
   const author = authorName;
 
   // ส่วนที่ 2: ผู้ตรวจสอบ (Chef Inspector)

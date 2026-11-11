@@ -1463,3 +1463,136 @@ body.role-admin #admin-map-drag-notice {
   outline: 2px solid #0284c7;
   box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.15);
 }
+
+/* ===================================================
+   Custom App Modal (แทนที่ window.alert ดั้งเดิม)
+   =================================================== */
+.app-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease-in-out;
+}
+.app-modal-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+.app-modal-card {
+  background: #ffffff;
+  border-radius: 20px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 25px 60px -12px rgba(15, 23, 42, 0.35);
+  text-align: center;
+  padding: 26px 24px;
+  transform: scale(0.92) translateY(12px);
+  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+}
+.app-modal-overlay.active .app-modal-card {
+  transform: scale(1) translateY(0);
+}
+.app-modal-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 14px auto;
+  font-size: 26px;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+.app-modal-icon.success {
+  background: #dcfce7;
+  color: #16a34a;
+  border: 2px solid #bbf7d0;
+}
+.app-modal-icon.error {
+  background: #fee2e2;
+  color: #dc2626;
+  border: 2px solid #fecaca;
+}
+.app-modal-icon.warning {
+  background: #fef3c7;
+  color: #d97706;
+  border: 2px solid #fde68a;
+}
+.app-modal-icon.info {
+  background: #e0f2fe;
+  color: #0284c7;
+  border: 2px solid #bae6fd;
+}
+.app-modal-title {
+  margin: 0 0 8px 0;
+  font-size: 1.18rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+.app-modal-message {
+  margin: 0 0 22px 0;
+  font-size: 0.92rem;
+  color: #475569;
+  line-height: 1.55;
+  white-space: pre-line;
+  word-break: break-word;
+}
+.app-modal-btn {
+  width: 100%;
+  padding: 11px 18px;
+  border: none;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  background: linear-gradient(135deg, #00695c, #004d40);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 105, 92, 0.28);
+}
+.app-modal-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+.app-modal-btn:active {
+  transform: translateY(0);
+}
+
+/* Inline Validation Helpers */
+.input-error-border {
+  border-color: #ef4444 !important;
+  background-color: #fef2f2 !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15) !important;
+}
+.field-error-msg {
+  display: block;
+  font-size: 0.78rem;
+  color: #ef4444;
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+/* Spinner Animation & Loading State */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin-custom {
+  animation: spin 0.85s linear infinite;
+}
+.btn-disabled-loading {
+  opacity: 0.75 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+}
+

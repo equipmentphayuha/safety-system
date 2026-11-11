@@ -116,6 +116,134 @@ let currentUserRole = storageService.get('pyh_role') || "inspector";
 let assetsList = [];
 let inspectionLogs = [];
 
+// ===================================================
+// CUSTOM APP MODAL & ALERT REPLACEMENT
+// ===================================================
+let _modalResolveCallback = null;
+
+export function showAppModal(title, message, type = 'info') {
+  return new Promise((resolve) => {
+    _modalResolveCallback = resolve;
+    const overlay = document.getElementById('custom-app-modal');
+    const titleEl = document.getElementById('app-modal-title');
+    const msgEl = document.getElementById('app-modal-msg');
+    const iconEl = document.getElementById('app-modal-icon');
+
+    if (!overlay || !titleEl || !msgEl || !iconEl) {
+      window._nativeAlert(`${title}\n\n${message}`);
+      resolve();
+      return;
+    }
+
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+
+    // ไอคอนตามประเภท
+    iconEl.className = `app-modal-icon ${type}`;
+    if (type === 'success') iconEl.innerHTML = '✓';
+    else if (type === 'error') iconEl.innerHTML = '✕';
+    else if (type === 'warning') iconEl.innerHTML = '⚠️';
+    else iconEl.innerHTML = 'ℹ️';
+
+    overlay.classList.add('active');
+  });
+}
+
+window.showAppModal = showAppModal;
+
+window.closeAppModal = function () {
+  const overlay = document.getElementById('custom-app-modal');
+  if (overlay) overlay.classList.remove('active');
+  if (typeof _modalResolveCallback === 'function') {
+    const cb = _modalResolveCallback;
+    _modalResolveCallback = null;
+    cb();
+  }
+};
+
+// ดักจับการคลิกพื้นที่พื้นหลัง modal เพื่อปิด
+document.addEventListener('click', (e) => {
+  const overlay = document.getElementById('custom-app-modal');
+  if (overlay && e.target === overlay) {
+    window.closeAppModal();
+  }
+});
+
+// บันทึก alert ดั้งเดิม และ Override window.alert ให้แสดง Custom Modal อัตโนมัติ
+window._nativeAlert = window.alert;
+window.alert = function (message) {
+  let title = "แจ้งเตือนจากระบบ";
+  let type = "info";
+  const str = String(message || '');
+
+  if (str.includes("สำเร็จ") || str.includes("เรียบร้อย") || str.includes("✅") || str.includes("🎉")) {
+    title = "ดำเนินการสำเร็จ";
+    type = "success";
+  } else if (str.includes("ผิดพลาด") || str.includes("ไม่สำเร็จ") || str.includes("ล้มเหลว") || str.includes("❌") || str.includes("ไม่ถูกต้อง")) {
+    title = "เกิดข้อผิดพลาด";
+    type = "error";
+  } else if (str.includes("คำเตือน") || str.includes("⚠️") || str.includes("กรุณา") || str.includes("🔒") || str.includes("⏰")) {
+    title = "ข้อความแจ้งเตือน";
+    type = "warning";
+  }
+
+  return showAppModal(title, str, type);
+};
+
+// ฟังก์ชันช่วยจัดการ Inline Form Validation
+export function validateForm(formElement) {
+  if (!formElement) return true;
+  let isValid = true;
+
+  // 1. ล้างสถานะ Error เดิม
+  formElement.querySelectorAll('.field-error-msg').forEach(el => el.textContent = '');
+  formElement.querySelectorAll('input, select, textarea').forEach(el => {
+    el.classList.remove('input-error-border');
+  });
+
+  // 2. ตรวจสอบช่องบังคับกรอก (data-required)
+  const requiredInputs = formElement.querySelectorAll('[data-required]');
+  requiredInputs.forEach(input => {
+    const errorEl = document.getElementById(`${input.id}-error`);
+    const val = input.value.trim();
+
+    if (!val) {
+      isValid = false;
+      input.classList.add('input-error-border');
+      if (errorEl) errorEl.textContent = input.getAttribute('data-required') || 'กรุณากรอกข้อมูลในช่องนี้';
+      return;
+    }
+
+    // 3. ตรวจสอบ Pattern เพิ่มเติม (data-pattern)
+    const pattern = input.getAttribute('data-pattern');
+    if (pattern) {
+      const regex = new RegExp(pattern);
+      if (!regex.test(val)) {
+        isValid = false;
+        input.classList.add('input-error-border');
+        if (errorEl) {
+          errorEl.textContent = input.getAttribute('data-pattern-msg') || 'รูปแบบข้อมูลไม่ถูกต้อง';
+        }
+      }
+    }
+  });
+
+  // 4. ลบขอบแดงทันทีเมื่อผู้ใช้เริ่มพิมพ์แก้ไข
+  requiredInputs.forEach(input => {
+    if (!input.dataset.validationBound) {
+      input.dataset.validationBound = 'true';
+      input.addEventListener('input', () => {
+        input.classList.remove('input-error-border');
+        const err = document.getElementById(`${input.id}-error`);
+        if (err) err.textContent = '';
+      });
+    }
+  });
+
+  return isValid;
+}
+window.validateForm = validateForm;
+
 // ประกาศบน window ทันทีตั้งแต่ต้นไฟล์ เพื่อให้โมดูลอื่นเข้าถึงได้ตลอดเวลา
 Object.defineProperty(window, 'assetsList', {
   get: () => assetsList,
@@ -154,13 +282,14 @@ export function renderHistoryTable() {
   if (keyword) logs = logs.filter(l => l.assetId?.toLowerCase().includes(keyword));
 
   if (logs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#64748b; padding:20px;">ไม่พบรายการที่ตรงกัน</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b; padding:20px;">ไม่พบรายการที่ตรงกัน</td></tr>`;
     return;
   }
 
   logs.slice(0, 100).forEach((log, index) => {
     const isPass = log.status === 'READY';
     const tr = document.createElement('tr');
+    const logId = log.id || '';
     tr.innerHTML = `
       <td style="text-align:center; color:#94a3b8; font-size:0.8rem; width:40px;">${index + 1}</td>
       <td style="font-size:0.82rem;">${log.timestampStr || log.timestampISO || '-'}</td>
@@ -169,6 +298,11 @@ export function renderHistoryTable() {
       <td><span class="badge ${isPass ? 'badge-ready' : 'badge-issue'}">${isPass ? '✅ ปกติ' : '⚠️ ชำรุด'}</span></td>
       <td>${log.photoURL ? `<a href="${log.photoURL}" target="_blank"><img class="img-thumb" src="${log.photoURL}" alt="ภาพหลักฐาน"></a>` : '-'}</td>
       <td style="font-size:0.82rem;">${log.notes || '-'}</td>
+      <td style="text-align:center;">
+        <button type="button" class="btn-sm" style="background:#f0fdfa; color:#0f766e; border:1px solid #99f6e4; border-radius:6px; padding:4px 8px; font-size:0.78rem; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:2px;" onclick="openEditInspectionNoteModal('${logId}')" title="แก้ไขหมายเหตุ">
+          ✏️ แก้ไข
+        </button>
+      </td>
     `;
     tbody.appendChild(tr);
   });
@@ -2509,6 +2643,106 @@ window.submitEditAsset = async function () {
   } finally {
     if (submitBtn) {
       submitBtn.innerText = "💾 บันทึกการแก้ไข";
+      submitBtn.disabled = false;
+    }
+  }
+};
+
+// ==========================================
+// แก้ไขหมายเหตุการตรวจเช็ก (Edit Inspection Note)
+// ==========================================
+window.openEditInspectionNoteModal = function (logId) {
+  if (currentUserRole === 'guest') {
+    alert("🔒 โหมดผู้เยี่ยมชม (Guest) ดูข้อมูลได้อย่างเดียวเท่านั้น\nกรุณาเข้าสู่ระบบด้วยบัญชีเจ้าหน้าที่เพื่อดำเนินการนี้");
+    return;
+  }
+  const log = inspectionLogs.find(l => l.id === logId);
+  if (!log) {
+    alert("ไม่พบข้อมูลบันทึกการตรวจเช็กนี้");
+    return;
+  }
+
+  const modal = document.getElementById('edit-inspection-note-modal');
+  const logIdInput = document.getElementById('edit-note-log-id');
+  const assetIdInput = document.getElementById('edit-note-asset-id');
+  const displayAssetId = document.getElementById('edit-note-display-asset-id');
+  const displayTime = document.getElementById('edit-note-display-time');
+  const displayInspector = document.getElementById('edit-note-display-inspector');
+  const noteTextarea = document.getElementById('edit-note-textarea');
+
+  if (logIdInput) logIdInput.value = log.id;
+  if (assetIdInput) assetIdInput.value = log.assetId || '';
+  if (displayAssetId) displayAssetId.textContent = log.assetId || '-';
+  if (displayTime) displayTime.textContent = log.timestampStr || log.timestampISO || '-';
+  if (displayInspector) displayInspector.textContent = log.inspector || '-';
+  if (noteTextarea) noteTextarea.value = (log.notes && log.notes !== '-') ? log.notes : '';
+
+  if (modal) modal.style.display = 'flex';
+};
+
+window.closeEditInspectionNoteModal = function () {
+  const modal = document.getElementById('edit-inspection-note-modal');
+  if (modal) modal.style.display = 'none';
+};
+
+window.submitEditInspectionNote = async function () {
+  const logId = document.getElementById('edit-note-log-id')?.value;
+  const assetId = document.getElementById('edit-note-asset-id')?.value;
+  const newNote = document.getElementById('edit-note-textarea')?.value.trim();
+  const submitBtn = document.getElementById('edit-note-submit-btn');
+
+  if (!logId) {
+    alert("ไม่พบรหัสบันทึกการตรวจ");
+    return;
+  }
+
+  const logIndex = inspectionLogs.findIndex(l => l.id === logId);
+  if (logIndex === -1) {
+    alert("ไม่พบบันทึกการตรวจในระบบ");
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.innerText = "⏳ กำลังบันทึก...";
+    submitBtn.disabled = true;
+  }
+
+  try {
+    const updatedNote = newNote || "-";
+    // อัปเดตใน Local State
+    inspectionLogs[logIndex].notes = updatedNote;
+    storageService.set('pyh_inspection_logs', inspectionLogs);
+
+    // อัปเดตใน Firebase Cloud Firestore
+    if (isFirebaseReady() && db) {
+      try {
+        const logDocRef = doc(db, "inspection_logs", logId);
+        await updateDoc(logDocRef, {
+          notes: updatedNote
+        });
+        console.log(`🔥 Updated notes for inspection log [${logId}] in Firestore`);
+
+        // หากบันทึกนี้เป็นผลตรวจล่าสุดของอุปกรณ์ ให้อัปเดตหมายเหตุใน assets ด้วย (ถ้ามีฟิลด์)
+        const assetIndex = assetsList.findIndex(a => a.assetId?.toLowerCase() === assetId?.toLowerCase());
+        if (assetIndex !== -1 && assetsList[assetIndex].firestoreId) {
+          await updateDoc(doc(db, "assets", assetsList[assetIndex].firestoreId), {
+            lastNotes: updatedNote
+          });
+        }
+      } catch (cloudErr) {
+        console.warn("Firestore update error in submitEditInspectionNote:", cloudErr);
+      }
+    }
+
+    alert(`💾 แก้ไขหมายเหตุการตรวจเช็กเรียบร้อยแล้ว`);
+    closeEditInspectionNoteModal();
+    renderHistoryTable();
+
+  } catch (err) {
+    alert("เกิดข้อผิดพลาดในการบันทึก: " + err.message);
+  } finally {
+    if (submitBtn) {
+      submitBtn.innerText = "💾 บันทึกหมายเหตุ";
       submitBtn.disabled = false;
     }
   }

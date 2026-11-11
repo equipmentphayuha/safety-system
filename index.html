@@ -384,7 +384,7 @@
     <section id="tab-register" class="tab-content">
       <div class="card">
         <h3>➕ ลงทะเบียนอุปกรณ์ความปลอดภัยใหม่</h3>
-        <form id="reg-form">
+        <form id="reg-form" novalidate>
           <div class="form-group-row">
             <div>
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -393,7 +393,11 @@
                   style="font-size:0.75rem; color:#059669; font-weight:700; background:#ecfdf5; padding:2px 8px; border-radius:4px; border:1px solid #a7f3d0;">⚡
                   รันต่ออัตโนมัติ</span>
               </div>
-              <input type="text" id="reg-id" placeholder="เช่น PYH-FE-ER1-09 หรือ PYH-EM-ER1-06" required>
+              <input type="text" id="reg-id" placeholder="เช่น PYH-FE-ER1-09 หรือ PYH-EM-ER1-06"
+                     data-required="กรุณาระบุรหัสประจำอุปกรณ์"
+                     data-pattern="^PYH-(FE|EM)-[A-Za-z0-9]+-[0-9]{2}$"
+                     data-pattern-msg="รูปแบบรหัสต้องขึ้นต้นด้วย PYH-FE- หรือ PYH-EM- เช่น PYH-FE-ER1-09">
+              <span class="field-error-msg" id="reg-id-error"></span>
             </div>
             <div>
               <label>ประเภทอุปกรณ์:</label>
@@ -422,12 +426,16 @@
             </div>
             <div>
               <label>ชั้นที่ติดตั้ง:</label>
-              <input type="number" id="reg-floor" value="1" min="1" max="5" required>
+              <input type="number" id="reg-floor" value="1" min="1" max="5" 
+                     data-required="กรุณาระบุชั้นที่ติดตั้ง (1-5)">
+              <span class="field-error-msg" id="reg-floor-error"></span>
             </div>
           </div>
 
           <label>ตำแหน่ง / จุดติดตั้งระบุชัดเจน:</label>
-          <input type="text" id="reg-location" placeholder="เช่น หน้าห้องเอกซเรย์, โถงทางเดินกลาง" required>
+          <input type="text" id="reg-location" placeholder="เช่น หน้าห้องเอกซเรย์, โถงทางเดินกลาง"
+                 data-required="กรุณาระบุตำแหน่งหรือจุดติดตั้งให้ชัดเจน">
+          <span class="field-error-msg" id="reg-location-error"></span>
 
           <!-- ส่วนกำหนดและขยับจุดติดตั้งบนผังอาคาร (Interactive Floor Plan Coordinate Picker) -->
           <div style="margin-top:14px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:12px;">
@@ -469,8 +477,12 @@
             </div>
           </div>
 
-          <button type="submit" class="btn-primary" style="margin-top:16px;">
-            ✨ บันทึกลงทะเบียน & สร้าง QR Code
+          <button type="submit" id="reg-submit-btn" class="btn-primary" style="margin-top:16px; display:inline-flex; align-items:center; justify-content:center; gap:8px;">
+            <svg id="reg-loading-spinner" class="animate-spin-custom" style="display:none; width:18px; height:18px;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle style="opacity:0.25;" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path style="opacity:0.75;" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span id="reg-btn-text">✨ บันทึกลงทะเบียน & สร้าง QR Code</span>
           </button>
         </form>
 
@@ -633,6 +645,53 @@
             <button type="submit" id="repair-submit-btn"
               style="background:#059669; color:white; border:none; padding:9px 20px; border-radius:8px; font-weight:600; cursor:pointer;">
               ✅ ยืนยันซ่อมเสร็จ & คืนสถานะปกติ
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal แก้ไขหมายเหตุการตรวจเช็ก (Edit Inspection Note Modal) -->
+    <div id="edit-inspection-note-modal"
+      style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:8600; align-items:center; justify-content:center; padding:16px;">
+      <div
+        style="background:white; border-radius:16px; width:100%; max-width:480px; box-shadow:0 25px 60px rgba(0,0,0,0.4); overflow:hidden; display:flex; flex-direction:column;">
+        <div
+          style="padding:16px 20px; background:linear-gradient(135deg, #0d9488, #0f766e); color:white; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h3 style="margin:0; font-size:1.15rem; color:white;">✏️ แก้ไขหมายเหตุการตรวจเช็ก</h3>
+            <p style="margin:2px 0 0; font-size:0.8rem; opacity:0.9;">ปรับปรุงหรือเพิ่มเติมบันทึกผลการตรวจสอบ</p>
+          </div>
+          <button type="button" onclick="closeEditInspectionNoteModal()"
+            style="background:none; border:none; color:white; font-size:1.4rem; cursor:pointer; line-height:1;">✕</button>
+        </div>
+        <form id="edit-inspection-note-form" onsubmit="event.preventDefault(); submitEditInspectionNote();"
+          style="padding:20px;">
+          <input type="hidden" id="edit-note-log-id" value="">
+          <input type="hidden" id="edit-note-asset-id" value="">
+
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:14px; font-size:0.88rem;">
+            <div style="margin-bottom:4px;"><b>รหัสอุปกรณ์:</b> <span id="edit-note-display-asset-id" style="color:#0f766e; font-weight:700;">-</span></div>
+            <div style="margin-bottom:4px; color:#475569;"><b>วัน-เวลาตรวจ:</b> <span id="edit-note-display-time">-</span></div>
+            <div style="color:#475569;"><b>ผู้ตรวจเช็ก:</b> <span id="edit-note-display-inspector">-</span></div>
+          </div>
+
+          <div style="margin-bottom:16px;">
+            <label style="font-weight:600; font-size:0.88rem; color:#1e293b; display:block; margin-bottom:6px;">
+              หมายเหตุ / รายละเอียดการตรวจเช็ก:
+            </label>
+            <textarea id="edit-note-textarea" rows="4" required
+              placeholder="พิมพ์หมายเหตุหรือรายละเอียดเพิ่มเติม เช่น ตรวจพบสภาพสมบูรณ์, เปลี่ยนสลักใหม่..."
+              style="width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:0.9rem; box-sizing:border-box; font-family:inherit; resize:vertical;"></textarea>
+          </div>
+
+          <div
+            style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid #f1f5f9; padding-top:14px;">
+            <button type="button" onclick="closeEditInspectionNoteModal()" class="btn-secondary"
+              style="padding:9px 16px; border-radius:8px; margin:0; cursor:pointer;">ยกเลิก</button>
+            <button type="submit" id="edit-note-submit-btn"
+              style="background:#0d9488; color:white; border:none; padding:9px 22px; border-radius:8px; font-weight:600; cursor:pointer; margin:0; display:inline-flex; align-items:center; gap:6px;">
+              💾 บันทึกหมายเหตุ
             </button>
           </div>
         </form>
@@ -864,6 +923,7 @@
                 <th>สถานะ</th>
                 <th>ภาพถ่ายหลักฐาน</th>
                 <th>หมายเหตุ</th>
+                <th style="width:70px; text-align:center;">จัดการ</th>
               </tr>
             </thead>
             <tbody id="history-rows">
@@ -1482,6 +1542,20 @@
 
   <!-- แจ้งเตือนสถานะการย้ายพิกัดหมุด (Admin Map Toast) -->
   <div id="map-toast-notification" class="map-toast"></div>
+
+  <!-- ============================================== -->
+  <!-- GLOBAL CUSTOM APP MODAL (แทนที่ alert เดิม) -->
+  <!-- ============================================== -->
+  <div id="custom-app-modal" class="app-modal-overlay">
+    <div class="app-modal-card">
+      <div id="app-modal-icon" class="app-modal-icon success">✓</div>
+      <h3 id="app-modal-title" class="app-modal-title">แจ้งเตือน</h3>
+      <p id="app-modal-msg" class="app-modal-message">ข้อความแจ้งเตือน</p>
+      <button type="button" id="app-modal-btn" class="app-modal-btn" onclick="closeAppModal()">
+        ตกลง
+      </button>
+    </div>
+  </div>
 
   <script type="module" src="app.js?v=1.0.0"></script>
 </body>

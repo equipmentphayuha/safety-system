@@ -25,6 +25,18 @@ function initRegisterForm() {
     regForm.dataset.initialized = 'true';
     regForm.addEventListener('submit', async (e) => {
       e.preventDefault();
+
+      // ตรวจสอบข้อมูลด้วย Inline Form Validation
+      if (typeof window.validateForm === 'function') {
+        const isFormValid = window.validateForm(regForm);
+        if (!isFormValid) {
+          if (typeof window.showAppModal === 'function') {
+            window.showAppModal('ข้อมูลไม่ถูกต้อง', 'กรุณาตรวจสอบช่องข้อความสีแดงและแก้ไขข้อมูลให้ถูกต้องก่อนบันทึก', 'warning');
+          }
+          return;
+        }
+      }
+
       const assetId = document.getElementById('reg-id').value.trim();
       if (!assetId) {
         alert("กรุณาระบุรหัสประจำอุปกรณ์");
@@ -33,81 +45,113 @@ function initRegisterForm() {
 
       const list = _appContext.getAssetsList();
       if (list.some(a => a.assetId?.trim().toUpperCase() === assetId.toUpperCase())) {
+        const idInput = document.getElementById('reg-id');
+        const idErr = document.getElementById('reg-id-error');
+        if (idInput) idInput.classList.add('input-error-border');
+        if (idErr) idErr.textContent = `รหัสอุปกรณ์ "${assetId}" มีอยู่ในระบบแล้ว กรุณาใช้รหัสอื่น`;
         alert(`⚠️ ขออภัย: รหัสอุปกรณ์ "${assetId}" มีอยู่ในระบบแล้ว กรุณาใช้รหัสอื่น`);
         return;
       }
 
-      const type = document.getElementById('reg-type').value;
-      const buildingSelect = document.getElementById('reg-building-select');
-      const buildingId = buildingSelect.value;
-      const buildingName = buildingSelect.options[buildingSelect.selectedIndex].text;
-      const location = document.getElementById('reg-location').value.trim();
-      const floor = parseInt(document.getElementById('reg-floor').value) || 1;
+      const submitBtn = document.getElementById('reg-submit-btn');
+      const spinner = document.getElementById('reg-loading-spinner');
+      const btnText = document.getElementById('reg-btn-text');
 
-      // คำนวณพิกัดจากหมุดที่กำหนดไว้บนแผนที่
-      const coordY = parseInt(document.getElementById('reg-coord-y').value) || 280;
-      const coordX = parseInt(document.getElementById('reg-coord-x').value) || 500;
-      const floorCoord = [coordY, coordX];
-      const campusCoord = { lat: 15.47712, lng: 100.13777 };
-
-      const newAsset = {
-        assetId,
-        type,
-        building: buildingName,
-        buildingId,
-        floor,
-        location,
-        status: "READY",
-        floorCoord,
-        campusCoord,
-        createdAt: new Date().toISOString()
+      // ฟังก์ชันควบคุมสถานะ Loading
+      const setRegisterLoading = (isLoading) => {
+        if (!submitBtn) return;
+        if (isLoading) {
+          submitBtn.disabled = true;
+          submitBtn.classList.add('btn-disabled-loading');
+          if (spinner) spinner.style.display = 'inline-block';
+          if (btnText) btnText.textContent = 'กำลังลงทะเบียน...';
+        } else {
+          submitBtn.disabled = false;
+          submitBtn.classList.remove('btn-disabled-loading');
+          if (spinner) spinner.style.display = 'none';
+          if (btnText) btnText.textContent = '✨ บันทึกลงทะเบียน & สร้าง QR Code';
+        }
       };
 
-      if (_appContext.isFirebaseReady() && _appContext.db) {
-        try {
-          const docId = assetId.replace(/[^a-zA-Z0-9]/g, '_');
-          await setDoc(doc(_appContext.db, "assets", docId), {
-            ...newAsset,
-            serverCreated: serverTimestamp()
-          });
-          newAsset.firestoreId = docId;
-        } catch (err) {
-          console.warn("Firestore add error:", err);
+      setRegisterLoading(true);
+
+      try {
+        const type = document.getElementById('reg-type').value;
+        const buildingSelect = document.getElementById('reg-building-select');
+        const buildingId = buildingSelect.value;
+        const buildingName = buildingSelect.options[buildingSelect.selectedIndex].text;
+        const location = document.getElementById('reg-location').value.trim();
+        const floor = parseInt(document.getElementById('reg-floor').value) || 1;
+
+        // คำนวณพิกัดจากหมุดที่กำหนดไว้บนแผนที่
+        const coordY = parseInt(document.getElementById('reg-coord-y').value) || 280;
+        const coordX = parseInt(document.getElementById('reg-coord-x').value) || 500;
+        const floorCoord = [coordY, coordX];
+        const campusCoord = { lat: 15.47712, lng: 100.13777 };
+
+        const newAsset = {
+          assetId,
+          type,
+          building: buildingName,
+          buildingId,
+          floor,
+          location,
+          status: "READY",
+          floorCoord,
+          campusCoord,
+          createdAt: new Date().toISOString()
+        };
+
+        if (_appContext.isFirebaseReady() && _appContext.db) {
+          try {
+            const docId = assetId.replace(/[^a-zA-Z0-9]/g, '_');
+            await setDoc(doc(_appContext.db, "assets", docId), {
+              ...newAsset,
+              serverCreated: serverTimestamp()
+            });
+            newAsset.firestoreId = docId;
+          } catch (err) {
+            console.warn("Firestore add error:", err);
+          }
         }
-      }
 
-      list.push(newAsset);
-      _appContext.setAssetsList(list);
-      storageService.set('pyh_assets_data', list);
+        list.push(newAsset);
+        _appContext.setAssetsList(list);
+        storageService.set('pyh_assets_data', list);
 
-      // แสดง QR Code (ลิงก์ตรงสำหรับเปิดผ่าน LINE / กล้องมือถือ / Google Lens)
-      const qrContainer = document.getElementById('qrcode');
-      qrContainer.innerHTML = "";
-      new QRCode(qrContainer, {
-        text: getAssetDirectUrl(assetId),
-        width: 150,
-        height: 150,
-        colorDark: "#000000",
-        colorLight: "#ffffff"
-      });
+        // แสดง QR Code (ลิงก์ตรงสำหรับเปิดผ่าน LINE / กล้องมือถือ / Google Lens)
+        const qrContainer = document.getElementById('qrcode');
+        qrContainer.innerHTML = "";
+        new QRCode(qrContainer, {
+          text: getAssetDirectUrl(assetId),
+          width: 150,
+          height: 150,
+          colorDark: "#000000",
+          colorLight: "#ffffff"
+        });
 
-      document.getElementById('qr-label').innerHTML = `
-        <b>${assetId}</b><br>
-        ${type}<br>
-        ${buildingName} - ${location}
-      `;
-      document.getElementById('qr-output').classList.remove('hidden');
+        document.getElementById('qr-label').innerHTML = `
+          <b>${assetId}</b><br>
+          ${type}<br>
+          ${buildingName} - ${location}
+        `;
+        document.getElementById('qr-output').classList.remove('hidden');
 
-      _appContext.updateDashboardUI();
-      _appContext.renderMapPins();
-      if (typeof window.renderRegisterExistingMarkers === 'function') {
-        window.renderRegisterExistingMarkers();
-      }
-      alert(`ลงทะเบียนอุปกรณ์ ${assetId} สำเร็จ! พร้อมพิมพ์สติกเกอร์`);
+        _appContext.updateDashboardUI();
+        _appContext.renderMapPins();
+        if (typeof window.renderRegisterExistingMarkers === 'function') {
+          window.renderRegisterExistingMarkers();
+        }
+        alert(`ลงทะเบียนอุปกรณ์ ${assetId} สำเร็จ! พร้อมพิมพ์สติกเกอร์`);
 
-      document.getElementById('reg-location').value = '';
-      if (typeof window.autoSuggestRegisterId === 'function') {
-        window.autoSuggestRegisterId();
+        document.getElementById('reg-location').value = '';
+        if (typeof window.autoSuggestRegisterId === 'function') {
+          window.autoSuggestRegisterId();
+        }
+      } catch (err) {
+        alert("เกิดข้อผิดพลาดในการลงทะเบียน: " + err.message);
+      } finally {
+        setRegisterLoading(false);
       }
     });
   }
